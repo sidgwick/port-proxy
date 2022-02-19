@@ -1,26 +1,51 @@
 import sys
+import time
+
 import yaml
-import logging
 import socket
 import struct
 import select
 import threading
 
-
 # 本程序实现以下功能
 # 假设有 A/B 两台机器, 因为某些原因, B 只能对外开放 1 个端口, 但是在 B 上又需要部署很多服务(比方说同时有 ssh, sftp 等)
 #
+
+# 指令设计
+# 在打开的数据通道上, 数据传输的时候都加上指令前缀, 根据指令前缀做出不同的动作:
+#
+# initial_connection + _id + target port
+# heartbeat
+# data + _id + length
+# close_connection + _id
+
+InsInitialConnection = 0x0000
+InsHeartbeat = 0x0001
+InsData = 0x0002
+InsCloseConnection = 0x0003
+
+
+class UnableReadSocketException(Exception): pass
+
+
+class TargetSocketNotExist(Exception): pass
+
 
 def ip_port_to_int(_ip, port):
     ip = struct.unpack("!I", socket.inet_aton(_ip))[0]
 
     return (ip << 16) + int(port)
 
+def six_bytes_id_to_int(data):
+    _id_a = struct.unpack("!L", data[:4])[0]
+    _id_b = struct.unpack("!H", data[4:6])[0]
+    return (_id_a << 16) + _id_b
+
 
 def read_prefix_meta(sock):
     data = sock.recv(12)
     if len(data) != 12:
-        raise Exception("unable to read prefix meta")
+        raise UnableReadSocketException("unable to read prefix meta")
 
     tmp = struct.unpack("!Q", data[:8])[0]
     length = struct.unpack("!L", data[8:])[0]
@@ -89,37 +114,6 @@ def forward_data(sock, remote, length=None, middleware=None):
     return length
 
 
-# 将发送到 sock 的数据流转发到 ar 对应的远端地址上
-def handle_tcp(args):
-    try:
-        sock = args.get("conn")
-        remote = args.get("remote")
-        middleware = args.get("middleware", {})
-        _handle_tcp(sock, remote, middleware)
-    except Exception as e:
-        print(e)
-        raise (e)
-    finally:
-        print("socket closed")
-        sock.close()
-        remote.close()
-
-
-def _handle_tcp(sock, remote, middleware):
-    fdset = [sock, remote]
-    while True:
-        r, w, e = select.select(fdset, [], [])
-        if sock in r:
-            _middleware = middleware.get("recv")
-            forward_data(sock, remote, middleware=_middleware)
-
-        if remote in r:
-            _middleware = middleware.get("resp")
-            # 读出来 prefix meta
-            port, length = read_prefix_meta(remote)
-            forward_data(remote, sock, length=length, middleware=_middleware)
-
-
 class Proxy():
 
     def __init__(self, server, config):
@@ -144,7 +138,7 @@ class Proxy():
 
         return data.replace(h, hr)
 
-    def serve(self):
+    def run(self):
         socketServer = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         socketServer.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
@@ -160,13 +154,6 @@ class Proxy():
             print("{} received connection from {}, id={}".format(self, addr, identity))
 
             server.register_connection(self.remote, identity, conn)
-
-    def run(self):
-        try:
-            self.serve()
-        except Exception as e:
-            print(e)
-            print("{} closed".format(self))
 
 
 class BaseServer(object):
@@ -184,23 +171,98 @@ class BaseServer(object):
 
         return res
 
-    def _get_sock(self, _id):
+    def get_sock(self, _id) -> socket.socket:
         conn = self.conn_list.get(_id, {})
         return conn.get("sock")
 
-    def get_sock(self, _id, port) -> socket.socket:
-        pass
-
-    def get_sock_port(self, sock):
+    def get_sock_id(self, sock):
         for _id, conn in self.conn_list.items():
             s = conn.get("sock")
             if s == sock:
-                return _id, conn.get("port")
+                return _id
 
         raise Exception("unknown socket port")
 
-    def register_connection(self, port, _id, sock):
+    def initial_application_connection(self, port, _id):
+        '''这个消息是服务端发送给远程客户端的'''
+        sock = self.get_sock(_id)
+        if sock is not None:
+            raise Exception("connection {} already existed".format(_id))
+
+        ip = "127.0.0.1"
+        print("try to connect local: {}:{}, id={}".format(ip, port, _id))
+        sock = socket.create_connection((ip, port))
+
         self.conn_list[_id] = {"port": port, "sock": sock}
+
+    def close_application_connection(self, _id):
+        '''这个指令服务端/远程客户端都可能收到'''
+        sock = self.get_sock(_id)
+        sock.close()
+        self.delete_conncetion(_id)
+
+    def swap_data(self, sock, _id, length):
+        app = self.get_sock(_id)
+        if app is None:
+            raise TargetSocketNotExist(_id)
+
+        # 将 sock 收到的数据转发到 app
+        l = forward_data(sock, app, length=length)
+        if l == 0:
+            return -1
+
+    def parse_message(self, sock):
+        # 指令长度 16 位, 目标端口 16 位, _id 48 位, length 32 位
+        # initial_connection + _id + target port
+        # heartbeat
+        # data + _id + length
+        # close_connection + _id
+        data = sock.recv(2)
+        ins = struct.unpack("!H", data)[0]
+
+        if ins == InsInitialConnection:
+            data = sock.recv(8)
+            data = struct.unpack("!Q", data)[0]
+            _id = (data & 0xFFFFFFFFFFFF0000) >> 16
+            port = data & 0x000000000000FFFF
+            self.initial_application_connection(port, _id)
+        elif ins == InsData:
+            data = sock.recv(10)
+            _id = six_bytes_id_to_int(data[:6])
+            length = struct.unpack("!L", data[6:])[0]
+            return self.swap_data(sock, _id, length)
+        elif ins == InsCloseConnection:
+            data = sock.recv(6)
+            _id = six_bytes_id_to_int(data)
+            self.close_application_connection(_id)
+        elif ins == InsHeartbeat:
+            pass
+        else:
+            raise Exception("Unknown data swap instruction: 0x{:X}".format(ins))
+
+    def build_initial_connection_message(self, identity, port):
+        ins_and_id = (InsInitialConnection << 48) + identity
+        ins_and_id = struct.pack("!Q", ins_and_id)
+        _port = struct.pack("!H", port)
+        return ins_and_id + _port
+
+    def build_close_connection_message(self, identity):
+        ins_and_id = (InsCloseConnection << 48) + identity
+        ins_and_id = struct.pack("!Q", ins_and_id)
+        return ins_and_id
+
+    def build_heartbeat_message(self):
+        ins = struct.pack("!H", InsHeartbeat)
+        return ins
+
+    def build_data_message(self, identity=None):
+        def _build_data_message(data):
+            ins_and_id = (InsData << 48) + identity
+            ins_and_id = struct.pack("!Q", ins_and_id)
+            length = struct.pack("!L", len(data))
+            return ins_and_id + length + data
+
+        return _build_data_message
 
     def delete_conncetion(self, _id):
         print("connection {} closed and delete it now".format(_id))
@@ -210,29 +272,23 @@ class BaseServer(object):
         fdset = self.get_fdset(sock)
         r, w, e = select.select(fdset, [], [], 1)
         if sock in r:
-            _id, port, length = read_prefix_meta(sock)
-            app = self.get_sock(_id, port)
-            # 将 sock 收到的数据转发到 app
-            l = forward_data(sock, app, length=length)
-            if l == 0:
-                print(sock)
-                sock.close()
-                self.delete_conncetion(_id)
+            self.parse_message(sock)
 
         for app in r:
             if app == sock:
                 continue
 
-            # 首先找到 port 信息
-            _id, port = self.get_sock_port(app)
+            # 非 sock 的文件描述符有数据可读的情况, 都是希望发送数据交换的
+            # 在 server 端, app 就是 proxy 和客户应用程序的连接
+            # 在远端 client 断, app 是 client 和应用程序连接
+            _id = self.get_sock_id(app)
 
             # 将 app 里面收到的数据, 通过 sock 发送出去
-            l = forward_data(app, sock, middleware=[prefix_meta(_id, port)])
+            l = forward_data(app, sock, middleware=[self.build_data_message(_id)])
             if l == 0:
-                print(app)
                 app.close()
                 self.delete_conncetion(_id)
-                pass
+                sock.send(self.build_close_connection_message(_id))
 
 
 class Server(BaseServer):
@@ -244,17 +300,12 @@ class Server(BaseServer):
             config = yaml.load(fh.read(), Loader=yaml.Loader)
             config = config.get("server")
 
+        self.config = config
         # 服务监听 地址:端口
         host, port = config.get('bind').split(":")
 
         self.host = host
         self.port = int(port)
-
-        # 代理配置列表
-        self.proxy_config_list = config.get('proxy')
-
-        # 代理服务线程列表
-        self.proxy = []
 
         # 远端客户端
         self.remote_client = None
@@ -262,82 +313,58 @@ class Server(BaseServer):
     def __str__(self):
         return "Server({}:{})".format(self.host, self.port)
 
-    def get_sock(self, _id, port):
-        return self._get_sock(_id)
+    def register_connection(self, port, _id, sock):
+        self.conn_list[_id] = {"port": port, "sock": sock}
 
-    def handle_remote_client(self, conn):
-        self.remote_client = conn
-        return
-
-        # 链接一开始, 首先发送自己的身份信息: 2 字节数据长度, N 字节的身份标识
-        # 此后此连接用于发送普通数据 + 心跳包
-        data = conn.recv(2)
-        if len(data) != 2:
-            raise Exception("bad initial connection meta info - length")
-
-        length = struct.unpack(">H", data)[0]
-
-        data = conn.recv(length)
-        if len(data) != length:
-            raise Exception("bad initial connection meta info - name")
-
-        name = str(struct.unpack("s", data)[0])
-        sl = self.remote_client.get(name)
-        if sl is None:
-            sl = []
-
-        sl.append(conn)
-        self.remote_client[name] = sl
+        # 向远程客户端发送初始化连接请求
+        data = self.build_initial_connection_message(_id, port)
+        self.remote_client.send(data)
 
     def main_loop(self):
         cnt = 1
         while True:
+            sock = self.remote_client  # type: socket.socket
             try:
                 print("main loop: {}".format(cnt))
                 cnt += 1
-                self._main_loop(self.remote_client)
-            except Exception as e:
-                print(e)
+                self._main_loop(sock)
+            except UnableReadSocketException as e:
+                print("remote client conncetion closed: {}".format(e))
+                sock.close()
+                self.remote_client = None
 
     def serve(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
         server.bind((self.host, self.port))
         server.listen(5)
 
-        msg = "{} start to accepting connections".format(self)
-        print(msg)
+        print("{} start to accepting connections".format(self))
 
         while True:
-            try:
-                conn, addr = server.accept()
-
-                print("remote client {} connected".format(addr))
-
-                self.handle_remote_client(conn)
-            except Exception as e:
-                print(e)
-
-    def init_proxy(self):
-        for proxy_cfg in self.proxy_config_list:
-            proxy = Proxy(server, proxy_cfg)
-
-            t = threading.Thread(target=proxy.run)
-            t.start()
-
-            self.proxy.append(proxy)
+            conn, addr = server.accept()
+            print("remote client {} connected".format(addr))
+            self.remote_client = conn
 
     def start(self):
         # 初始化服务, 接受来自目标服务器的请求, 将来数据可以转发到目标机器
+        threads = []
+
         st = threading.Thread(target=self.serve)
-        st.start()
+        threads.append(st)
 
-        # 监听本地代理端口
-        self.init_proxy()
+        # 启动本地代理端口监听服务
+        for proxy_cfg in self.config.get('proxy'):
+            proxy = Proxy(server, proxy_cfg)
+            t = threading.Thread(target=proxy.run)
+            threads.append(t)
 
-        alt = threading.Thread(target=self.main_loop)
-        alt.start()
+        # 开启主循环
+        t = threading.Thread(target=self.main_loop)
+        threads.append(t)
+
+        for t in threads:
+            t.start()
 
 
 class Client(BaseServer):
@@ -354,17 +381,14 @@ class Client(BaseServer):
         self.host = host
         self.port = int(port)
 
-    def get_sock(self, _id, port):
-        sock = self._get_sock(_id)
-        if sock is not None:
-            return sock
-
-        ip = "127.0.0.1"
-        print("try to connect local: {}:{}, id={}".format(ip, port, _id))
-        sock = socket.create_connection((ip, port))
-
-        self.register_connection(port, _id, sock)
-        return sock
+    def heartbeat(self, sock):
+        while True:
+            try:
+                print("client heartbeat send")
+                sock.send(self.build_heartbeat_message())
+            except:
+                break
+            time.sleep(1)
 
     def start(self):
         ar = (self.host, self.port)
@@ -372,13 +396,19 @@ class Client(BaseServer):
         while True:
             sock = socket.create_connection(ar)
             try:
+                t = threading.Thread(target=self.heartbeat, args=(sock,))
+                t.start()
+
                 while True:
                     self._main_loop(sock)
             except Exception as e:
-                print(e)
+                raise(e)
+                print("client exception", e)
             finally:
                 print("socket closed, try to reopen")
                 sock.close()
+
+
 
 
 if __name__ == '__main__':

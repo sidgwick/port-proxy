@@ -42,7 +42,6 @@ def prefix_meta(_id, port):
 
 
 def send_data(sock, data):
-    print(data)
     bytes_sent = 0
     while True:
         r = sock.send(data[bytes_sent:])
@@ -160,7 +159,7 @@ class Proxy():
             identity = ip_port_to_int(addr[0], addr[1])
             print("{} received connection from {}, id={}".format(self, addr, identity))
 
-            server.register_proxy(self.remote, identity, conn)
+            server.register_connection(self.remote, identity, conn)
 
     def run(self):
         try:
@@ -170,10 +169,77 @@ class Proxy():
             print("{} closed".format(self))
 
 
-class Server(object):
+class BaseServer(object):
+    def __init__(self):
+        self.conn_list = {}
+
+    def get_fdset(self, sock):
+        res = []
+
+        if sock is not None:
+            res.append(sock)
+
+        for conn in self.conn_list.values():
+            res.append(conn.get("sock"))
+
+        return res
+
+    def _get_sock(self, _id):
+        conn = self.conn_list.get(_id, {})
+        return conn.get("sock")
+
+    def get_sock(self, _id, port) -> socket.socket:
+        pass
+
+    def get_sock_port(self, sock):
+        for _id, conn in self.conn_list.items():
+            s = conn.get("sock")
+            if s == sock:
+                return _id, conn.get("port")
+
+        raise Exception("unknown socket port")
+
+    def register_connection(self, port, _id, sock):
+        self.conn_list[_id] = {"port": port, "sock": sock}
+
+    def delete_conncetion(self, _id):
+        print("connection {} closed and delete it now".format(_id))
+        del self.conn_list[_id]
+
+    def _main_loop(self, sock):
+        fdset = self.get_fdset(sock)
+        r, w, e = select.select(fdset, [], [], 1)
+        if sock in r:
+            _id, port, length = read_prefix_meta(sock)
+            app = self.get_sock(_id, port)
+            # 将 sock 收到的数据转发到 app
+            l = forward_data(sock, app, length=length)
+            if l == 0:
+                print(sock)
+                sock.close()
+                self.delete_conncetion(_id)
+
+        for app in r:
+            if app == sock:
+                continue
+
+            # 首先找到 port 信息
+            _id, port = self.get_sock_port(app)
+
+            # 将 app 里面收到的数据, 通过 sock 发送出去
+            l = forward_data(app, sock, middleware=[prefix_meta(_id, port)])
+            if l == 0:
+                print(app)
+                app.close()
+                self.delete_conncetion(_id)
+                pass
+
+
+class Server(BaseServer):
 
     def __init__(self, cfg_path):
-        config = {}
+        super(Server, self).__init__()
+
         with open(cfg_path) as fh:
             config = yaml.load(fh.read(), Loader=yaml.Loader)
             config = config.get("server")
@@ -192,41 +258,12 @@ class Server(object):
 
         # 远端客户端
         self.remote_client = None
-        self.proxy_socks = {}
 
     def __str__(self):
         return "Server({}:{})".format(self.host, self.port)
 
-    def get_fdset(self, sock):
-        res = []
-
-        if sock is not None:
-            res.append(sock)
-
-        for i in self.proxy_socks:
-            res.append(self.proxy_socks.get(i).get("sock"))
-
-        return res
-
-    def get_proxy_sock(self, _id):
-        proxy = self.proxy_socks[_id]
-        return proxy.get("sock")
-
-    def get_port_by_app_sock(self, sock):
-        for _id in self.proxy_socks:
-            app = self.proxy_socks.get(_id)
-            s = app.get("sock")
-            if s == sock:
-                return _id, app.get("port")
-
-        raise Exception("unknown application port")
-
-    def register_proxy(self, port, _id, sock):
-        self.proxy_socks[_id] = {"port": port, "sock": sock}
-
-    def delete_proxy(self, _id):
-        print("proxy {} closed and delete it now".format(_id))
-        del self.proxy_socks[_id]
+    def get_sock(self, _id, port):
+        return self._get_sock(_id)
 
     def handle_remote_client(self, conn):
         self.remote_client = conn
@@ -252,39 +289,13 @@ class Server(object):
         sl.append(conn)
         self.remote_client[name] = sl
 
-    def _main_loop(self):
-        sock = self.remote_client
-
-        fdset = self.get_fdset(sock)
-        r, w, e = select.select(fdset, [], [], 1)
-        if sock in r:
-            print("remote client readable")
-            _id, port, length = read_prefix_meta(sock)
-            app = self.get_proxy_sock(_id)
-            # 将 sock 收到的数据转发到 app
-            forward_data(sock, app, length=length)
-
-        for app in r:
-            if app == sock:
-                continue
-
-            # 首先找到 port 信息
-            _id, port = self.get_port_by_app_sock(app)
-            print("app client readable, _id: {}".format(_id))
-
-            # 将 app 里面收到的数据, 通过 sock 发送出去
-            l = forward_data(app, sock, middleware=[prefix_meta(_id, port)])
-            if l == 0:
-                app.close()
-                self.delete_proxy(_id)
-
     def main_loop(self):
         cnt = 1
         while True:
             try:
                 print("main loop: {}".format(cnt))
                 cnt += 1
-                self._main_loop()
+                self._main_loop(self.remote_client)
             except Exception as e:
                 print(e)
 
@@ -329,10 +340,11 @@ class Server(object):
         alt.start()
 
 
-class Client(object):
+class Client(BaseServer):
 
     def __init__(self, cfg_path):
-        config = {}
+        super(Client, self).__init__()
+
         with open(cfg_path) as fh:
             config = yaml.load(fh.read(), Loader=yaml.Loader)
             config = config.get("client")
@@ -342,61 +354,17 @@ class Client(object):
         self.host = host
         self.port = int(port)
 
-        self.app = {}
-
-    def get_app(self, _id, port):
-        app = self.app.get(_id)
-        if app is not None:
-            return app.get("sock")
+    def get_sock(self, _id, port):
+        sock = self._get_sock(_id)
+        if sock is not None:
+            return sock
 
         ip = "127.0.0.1"
         print("try to connect local: {}:{}, id={}".format(ip, port, _id))
-        app = socket.create_connection((ip, port))
+        sock = socket.create_connection((ip, port))
 
-        self.app[_id] = {
-            "port": port,
-            "sock": app,
-        }
-
-        return app
-
-    def get_fdset(self, additional):
-        fdset = [self.app.get(x).get("sock") for x in self.app]
-        fdset.append(additional)
-
-        return fdset
-
-    def get_port_by_app_sock(self, sock):
-        for _id in self.app:
-            app = self.app.get(_id)
-            if app.get("sock") == sock:
-                return _id, app.get("port")
-
-        raise Exception("unknown application port")
-
-    def _start(self, sock):
-
-        print("proxy client connect to server {}:{}".format(
-            self.host, self.port))
-
-        while True:
-            fdset = self.get_fdset(sock)
-            r, w, e = select.select(fdset, [], [])
-            if sock in r:
-                _id, port, length = read_prefix_meta(sock)
-                app = self.get_app(_id, port)
-                # 将 sock 收到的数据转发到 app
-                forward_data(sock, app, length=length)
-
-            for app in r:
-                if app == sock:
-                    continue
-
-                # 首先找到 port 信息
-                _id, port = self.get_port_by_app_sock(app)
-
-                # 将 app 里面收到的数据, 通过 sock 发送出去
-                forward_data(app, sock, middleware=[prefix_meta(_id, port)])
+        self.register_connection(port, _id, sock)
+        return sock
 
     def start(self):
         ar = (self.host, self.port)
@@ -404,7 +372,8 @@ class Client(object):
         while True:
             sock = socket.create_connection(ar)
             try:
-                self._start(sock)
+                while True:
+                    self._main_loop(sock)
             except Exception as e:
                 print(e)
             finally:

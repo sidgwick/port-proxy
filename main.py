@@ -42,30 +42,6 @@ def six_bytes_id_to_int(data):
     return (_id_a << 16) + _id_b
 
 
-def read_prefix_meta(sock):
-    data = sock.recv(12)
-    if len(data) != 12:
-        raise UnableReadSocketException("unable to read prefix meta")
-
-    tmp = struct.unpack("!Q", data[:8])[0]
-    length = struct.unpack("!L", data[8:])[0]
-
-    identity = (tmp & 0xFFFFFFFFFFFF0000) >> 16
-    port = tmp & 0x000000000000FFFF
-    return identity, port, length
-
-
-def prefix_meta(_id, port):
-    id_and_port = (_id << 16) + port
-
-    def _prefix_meta(data):
-        prefix = struct.pack("!Q", id_and_port)
-        length = struct.pack("!L", len(data))
-        return prefix + length + data
-
-    return _prefix_meta
-
-
 def send_data(sock, data):
     bytes_sent = 0
     while True:
@@ -181,7 +157,7 @@ class BaseServer(object):
             if s == sock:
                 return _id
 
-        raise Exception("unknown socket port")
+        return None
 
     def initial_application_connection(self, port, _id):
         '''这个消息是服务端发送给远程客户端的'''
@@ -270,7 +246,7 @@ class BaseServer(object):
 
     def _main_loop(self, sock):
         fdset = self.get_fdset(sock)
-        r, w, e = select.select(fdset, [], [], 1)
+        r, w, e = select.select(fdset, [], [], 0.1)
         if sock in r:
             self.parse_message(sock)
 
@@ -282,6 +258,8 @@ class BaseServer(object):
             # 在 server 端, app 就是 proxy 和客户应用程序的连接
             # 在远端 client 断, app 是 client 和应用程序连接
             _id = self.get_sock_id(app)
+            if _id is None and app.fileno() == -1:
+                continue
 
             # 将 app 里面收到的数据, 通过 sock 发送出去
             l = forward_data(app, sock, middleware=[self.build_data_message(_id)])

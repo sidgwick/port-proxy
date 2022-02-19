@@ -81,13 +81,13 @@ def forward_data(sock, remote, length=None, middleware=None):
 
     cnt = 0
     while cnt < length:
-        l = _forward_data(sock, remote, max_len=length, middleware=middleware)
+        l = _forward_data(sock, remote, max_len=length - cnt, middleware=middleware)
         cnt += l
 
         if l == 0:
             raise Exception("数据长度不足")
 
-    return length
+    return cnt
 
 
 class Proxy():

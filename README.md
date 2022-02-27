@@ -117,3 +117,4 @@ server: 127.0.0.1:9015
 ## TODO
 
 - [x] 支持多个 Remote Server 连接
+- [ ] 对 `conn_list`, `remote_server` 操作加锁(并发数据竞争)

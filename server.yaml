@@ -1,0 +1,25 @@
+# 转发程序收到的数据, 将由这个地址进入远端机器
+bind: 0.0.0.0:9015
+
+proxy:
+  # 下面这个配置表示, 进入 6688 端口的所有数据, 将会被转发到 remote_server1 远端 17211 这个端口
+  - remote_name: remote_server1
+    port_list:
+      - type: http
+        bind: 127.0.0.1:6688
+        remote: 17211
+
+      - type: tcp # tcp 流量转发
+        bind: 127.0.0.1:6689
+        remote: 17210
+
+  # 下面这个配置表示, 进入 6688 端口的所有数据, 将会被转发到 remote_server2 远端 17211 这个端口
+  - remote_name: remote_server2
+    port_list:
+      - type: http
+        bind: 127.0.0.1:6678
+        remote: 17211
+
+      - type: tcp # tcp 流量转发
+        bind: 127.0.0.1:6679
+        remote: 17210

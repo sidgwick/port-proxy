@@ -1,0 +1,14 @@
+#!/bin/sh -e
+
+set -e
+
+# ref: postinst in sudo package
+
+case "$1" in
+configure)
+  ;;
+
+abort-removal)
+  ;;
+
+esac

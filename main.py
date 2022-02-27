@@ -467,9 +467,11 @@ class Client(BaseServer):
 
 if __name__ == '__main__':
     t = sys.argv[1]
+    cfg_path = "/etc/pproxy/{}.yaml".format(t)
+
     if t == "server":
-        server = Server("server.yaml")
+        server = Server(cfg_path)
         server.start()
     elif t == "client":
-        server = Client("client.yaml")
+        server = Client(cfg_path)
         server.start()

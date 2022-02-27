@@ -1,0 +1,12 @@
+[Unit]
+Description=PortProxy server daemon
+
+[Service]
+ExecStart=python3 -u /usr/bin/pproxy %i
+ExecReload=/bin/kill -HUP $MAINPID
+Type=simple
+Restart=always
+RestartSec=2s
+SyslogIdentifier=pproxy-%i
+
+[Install]

@@ -1,0 +1,9 @@
+Package: pproxy
+Version: 0.0.1
+Section: utils
+Priority: extra
+Architecture: all
+Depends: python3, python3-yaml
+Maintainer: Zhigang Song <song@iuwei.fun>
+Homepage: https://github.com/sidgwick/port-proxy
+Description: A tool for TCP port data forwarding

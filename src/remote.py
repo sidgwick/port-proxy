@@ -22,12 +22,14 @@ class RemoteServer(base.BaseServer):
 
         self.sel = selectors.DefaultSelector()
         self.app_sel = selectors.DefaultSelector()
-        self.conns: dict[int, socket.socket] = {}
 
         # app_server 保存了 remote server 和 app server 之间的 sock 信息
         # 因为数据还需要传回到 local server, 因此还会记录对应的 local/remote server 之间的 sock
         # value 里面第一个套接字是 local/remote, 第二个是 remote/app
         self.app_server: dict[int, tuple[socket.socket, socket.socket]] = {}
+
+    def __str__(self):
+        return f"{self.config.get('bind')}"
 
     def init_conn_to_app_server(self, conn: socket.socket, _id, port):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -100,10 +102,16 @@ class RemoteServer(base.BaseServer):
             pass
 
     def service_connection(self, key, mask):
-        sock = key.fileobj
+        sock: socket.socket = key.fileobj
 
         if mask & selectors.EVENT_READ:
-            msg = message.fetch_message(sock)
+            msg = None
+            try:
+                msg = message.fetch_message(sock)
+            except Exception as e:
+                logging.error(f"Failed to fetch message, error={e}")
+                self.close_swap_connection(sock)
+
             if msg is not None:
                 self.dispatch_message(sock, msg)
 
@@ -119,6 +127,11 @@ class RemoteServer(base.BaseServer):
 
         conn.setblocking(False)
         self.app_sel.register(conn, selectors.EVENT_READ, data=1)
+
+    def close_swap_connection(self, sock: socket.socket):
+        logging.info(f"close connection to {sock.getpeername()}")
+        self.app_sel.unregister(sock)
+        sock.close()
 
     def swap(self):
         try:

@@ -33,9 +33,15 @@ class LocalServer(BaseServer):
         remote_server = self.config.get("remote-server")
         ip, port = util.parse_ip_port(remote_server)
 
-        logging.info(f"建立 local server -> remote server 的连接, remote_server={remote_server}")
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((ip, port))
+        while True:
+            try:
+                logging.info(f"建立 local server -> remote server 的连接, remote_server={ip}:{port}")
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect((ip, port))
+                break
+            except Exception as e:
+                logging.error(f"建立到 remote server 连接失败: {e}, 稍后即将重试...")
+                time.sleep(2)
 
         return sock
 
@@ -75,8 +81,16 @@ class LocalServer(BaseServer):
             time.sleep(15)
 
     def read_remote_server(self):
+        msg = None
+
         while True:
-            msg = message.fetch_message(self.sock)
+            try:
+                msg = message.fetch_message(self.sock)
+            except Exception as e:
+                logging.error(f"fetch message from remote server error {e}")
+                logging.info("restarting connection to remote server")
+                self.sock = self.init_remote_server()
+
             if msg is None:
                 continue
 

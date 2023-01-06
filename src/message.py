@@ -67,14 +67,18 @@ def heartbeat_message():
     return Message(InsHeartbeat)
 
 
-def initial_connection_message(sock: socket.socket, port):
-    _id = util.sock_id(sock)
+def initial_connection_message(port, sock: socket.socket = None, _id=None):
+    if _id is None:
+        _id = util.sock_id(sock)
+
     return Message(InsInitialConnection, _id=_id, port=port)
 
 
-def close_connection_message(sock: socket.socket, port):
-    _id = util.sock_id(sock)
-    return Message(InsCloseConnection, _id=_id, port=port)
+def close_connection_message(sock: socket.socket = None, _id=None):
+    if _id is None:
+        _id = util.sock_id(sock)
+
+    return Message(InsCloseConnection, _id=_id)
 
 
 def data_message(data, sock: socket.socket = None, _id=None):

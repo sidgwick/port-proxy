@@ -80,7 +80,8 @@ class LocalServer(BaseServer):
             if msg is None:
                 continue
 
-            print(self.app_client.get(msg.id), self.app_client)
+            logging.debug(f"received message from remote server {msg}")
+
             proxy = self.app_client[msg.id]
             proxy.read_from_local_server_write_to_app_client(msg)
 

@@ -35,30 +35,32 @@ class LocalProxy(threading.Thread):
         _id = util.sock_id(sock)
         self.connection[_id] = sock
 
+    def unregister_connection(self, sock: socket.socket):
+        _id = util.sock_id(sock)
+        del self.connection[_id]
+
     def send_to_local_server(self, msg: message.Message):
         msg.port = self.remote
         self.server.send(msg)
 
     def init_app_client_conn(self, sock: socket.socket):
-        _id = util.sock_id(sock)
-        self.connection[_id] = sock
+        self.register_connection(sock)
 
         # 将套接字+proxy 对象一起注册到 local server 里面, 后面 local 收到数据才知道怎么发回来
         self.server.register_app_client_conn(self, sock)
 
-        msg = message.initial_connection_message(sock, self.remote)
+        msg = message.initial_connection_message(self.remote, sock=sock)
         self.send_to_local_server(msg)
 
     def close_app_client_connection(self, sock: socket.socket):
-        _id = util.sock_id(sock)
         ip, port = sock.getpeername()
 
-        del self.connection[_id]
         logging.info(f"closing connection to app client proxy {ip}:{port}")
 
-        msg = message.close_connection_message(sock, self.remote)
+        msg = message.close_connection_message(sock=sock)
         self.send_to_local_server(msg)
 
+        self.unregister_connection(sock)
         self.sel.unregister(sock)
         self.server.unregister_app_client_conn(sock)
         sock.close()
@@ -80,7 +82,7 @@ class LocalProxy(threading.Thread):
         elif msg.ins == message.InsData:
             sock.send(msg.data)
         elif msg.ins == message.InsCloseConnection:
-            pass
+            self.close_app_client_connection(sock)
         elif msg.ins == message.InsHeartbeat:
             pass
 

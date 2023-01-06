@@ -31,23 +31,41 @@ class RemoteServer(base.BaseServer):
 
     def init_conn_to_app_server(self, conn: socket.socket, _id, port):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect(('0', port))
+
+        try:
+            sock.connect(('0', port))
+        except Exception as e:
+            logging.error(f'Failed to connect to app server {port}')
+            msg = message.close_connection_message(_id=_id)
+            self.send_message(conn, msg)
+            sock.close()
+            return
 
         self.app_server[_id] = (conn, sock)
         self.app_sel.register(sock, selectors.EVENT_READ, data=2)
 
     def close_conn_to_app_server(self, _id):
-        _, sock = self.app_server[_id]
+        ss = self.app_server.get(_id)
+        if ss is None:
+            logging.debug("收到断开连接请求但是找不到目标 socket, 此错误已经被忽略")
+            return
+
+        _, sock = ss
         del self.app_server[_id]
         self.app_sel.unregister(sock)
         sock.close()
 
     def write_to_app_server(self, _id, data):
-        _, sock = self.app_server[_id]
+        ss = self.app_server.get(_id)
+        if ss is None:
+            logging.debug("收到数据交换请求但是找不到目标 socket, 此错误已经被忽略")
+            return
+
+        _, sock = ss
         sock.send(data)
 
-    def send_message(self, sock, msg):
-        logging.debug(f"sending {msg} to {sock}")
+    def send_message(self, sock: socket.socket, msg):
+        logging.debug(f"sending {msg} to {sock.getpeername()}")
         _msg = msg.encode()
         sock.send(_msg)
 
@@ -70,6 +88,8 @@ class RemoteServer(base.BaseServer):
         self.send_message(conn, msg)
 
     def dispatch_message(self, sock: socket.socket, msg: message.Message):
+        logging.debug(f"message received from {sock.getpeername()}, message={msg}")
+
         if msg.ins == message.InsInitialConnection:
             self.init_conn_to_app_server(sock, msg.id, msg.port)
         elif msg.ins == message.InsData:
@@ -77,7 +97,7 @@ class RemoteServer(base.BaseServer):
         elif msg.ins == message.InsCloseConnection:
             self.close_conn_to_app_server(msg.id)
         elif msg.ins == message.InsHeartbeat:
-            logging.debug(f"heartbeat message received from {sock}")
+            pass
 
     def service_connection(self, key, mask):
         sock = key.fileobj

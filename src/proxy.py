@@ -1,19 +1,18 @@
-
 class Proxy():
 
-    def __init__(self, server, name, config):
-        self.remote_server_name = name
+    def __init__(self, _id, server, config):
+        self.id = _id
         self.server = server
 
         self.type = config.get("type")
         self.remote = int(config.get("remote"))
-
-        host, port = config.get("bind").split(":")
-        self.host = host
-        self.port = int(port)
+        self.local = int(config.get("local"))
 
     def __str__(self):
-        return "Proxy({}:{} -> {}:{})".format(self.host, self.port, self.server.host, self.remote)
+        return "Proxy<{}, local({}) -> remote({})>".format(self.type, self.local, self.remote)
+
+    def start(self):
+        pass
 
     def http_proxy(self, data):
         rh, rp = (self.server.host, self.remote)
@@ -42,4 +41,3 @@ class Proxy():
                 server.register_connection(self.remote_server_name, self.remote, identity, conn)
             except Exception as e:
                 print("proxy connection error: {}".format(e))
-

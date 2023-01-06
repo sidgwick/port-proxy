@@ -1,0 +1,7 @@
+# 远端服务器的地址
+remote-server: 127.0.0.1:9015
+
+proxy_list:
+  - type: tcp # 代理 tcp 流量
+    local: 6689 # local server 监听在 6689
+    remote: 17210 # remote server 需要把数据发送到它的宿主机的 17210 端口

@@ -8,9 +8,6 @@ import select
 import threading
 
 
-
-
-
 class BaseServer(object):
 
     def __init__(self):
@@ -134,10 +131,6 @@ class BaseServer(object):
         ins_and_id = struct.pack("!Q", ins_and_id)
         return ins_and_id
 
-    def build_heartbeat_message(self):
-        ins = struct.pack("!H", InsHeartbeat)
-        return ins
-
     def build_data_message(self, identity=None):
 
         def _build_data_message(data):
@@ -182,4 +175,3 @@ class BaseServer(object):
                     app.close()
                     self.delete_conncetion(_id)
                     sock.send(self.build_close_connection_message(_id))
-

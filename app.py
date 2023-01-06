@@ -1,20 +1,12 @@
 import sys
-import time
+import logging
 
-import yaml
-import socket
-import struct
-import select
-import threading
+from src.local import LocalServer
 
+logging.basicConfig(level=logging.DEBUG)
 
 if __name__ == '__main__':
-    t = sys.argv[1]
-    cfg_path = "/etc/pproxy/{}.yaml".format(t)
+    cfg_path = sys.argv[1]
 
-    if t == "server":
-        server = Server(cfg_path)
-        server.start()
-    elif t == "client":
-        server = Client(cfg_path)
-        server.start()
+    server = LocalServer(cfg_path)
+    server.start()

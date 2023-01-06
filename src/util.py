@@ -1,12 +1,3 @@
-
-# 数据交换指令
-InsInitialRemoteServer = 0x0000
-InsInitialConnection = 0x0001
-InsHeartbeat = 0x0002
-InsData = 0x0003
-InsCloseConnection = 0x0004
-
-
 def ip_port_to_int(_ip, port):
     ip = struct.unpack("!I", socket.inet_aton(_ip))[0]
 

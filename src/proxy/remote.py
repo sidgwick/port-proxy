@@ -11,15 +11,13 @@ if TYPE_CHECKING:
     from .. import local
 
 
-class Proxy(threading.Thread):
+class RemoteProxy():
 
-    def __init__(self, _id: int, server: local.LocalServer, config: dict):
-        super(Proxy, self).__init__()
-
-        self.daemon = True
+    def __init__(self, _id: int, port: int):
+        super(RemoteProxy, self).__init__()
 
         self.id = _id
-        self.server = server
+        self.port = port
 
         self.config = config
         self.local = config.get("local")
@@ -71,7 +69,7 @@ class Proxy(threading.Thread):
         if data is None or len(data) == 0:
             return self.close_app_client_connection(sock)
 
-        msg = message.data_message(sock, data)
+        msg = message.data_message(data, sock=sock)
         self.send_to_local_server(msg)
 
     def read_from_local_server_write_to_app_client(self, msg: message.Message):

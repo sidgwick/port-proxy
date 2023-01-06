@@ -31,6 +31,7 @@ def fetch_message(sock: socket.socket) -> Message:
         msg = f"期望能读取到最好 16 bits 的指令数据, 实际读到内容 {data}"
         raise UnableReadSocketException(msg, sock)
 
+    msg = None
     ins = struct.unpack("!H", data)[0]
 
     if ins == InsInitialConnection:
@@ -53,11 +54,13 @@ def fetch_message(sock: socket.socket) -> Message:
     elif ins == InsCloseConnection:
         data = sock.recv(6)
         _id = util.six_bytes_id_to_int(data)
-        msg = Message(InsCloseConnection, _id=_id, port=port)
+        msg = Message(InsCloseConnection, _id=_id)
     elif ins == InsHeartbeat:
         msg = Message(InsHeartbeat)
     else:
         raise Exception("Unknown data swap instruction: 0x{:X}".format(ins))
+
+    return msg
 
 
 def heartbeat_message():
@@ -74,8 +77,9 @@ def close_connection_message(sock: socket.socket, port):
     return Message(InsCloseConnection, _id=_id, port=port)
 
 
-def data_message(sock: socket.socket, data):
-    _id = util.sock_id(sock)
+def data_message(data, sock: socket.socket = None, _id=None):
+    if _id is None:
+        _id = util.sock_id(sock)
     return Message(InsData, _id=_id, data=data)
 
 

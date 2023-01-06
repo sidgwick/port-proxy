@@ -4,7 +4,7 @@ import time
 import logging
 
 from . import util, message
-from .proxy.proxy import Proxy
+from .proxy.local import LocalProxy
 from .base import BaseServer
 
 
@@ -23,7 +23,7 @@ class LocalServer(BaseServer):
         self.sock = None
         self.lock = threading.Lock()
 
-        self.app_client: dict[int, Proxy] = {}
+        self.app_client: dict[int, LocalProxy] = {}
 
     def init_remote_server(self):
         if self.sock != None:
@@ -40,11 +40,11 @@ class LocalServer(BaseServer):
         return sock
 
     def init_proxy_server(self, _id, cfg):
-        proxy = Proxy(_id, self, cfg)
+        proxy = LocalProxy(_id, self, cfg)
         proxy.start()
         return proxy
 
-    def register_app_client_conn(self, proxy: Proxy, sock: socket.socket):
+    def register_app_client_conn(self, proxy: LocalProxy, sock: socket.socket):
         _id = util.sock_id(sock)
         self.app_client[_id] = proxy
 
@@ -72,7 +72,7 @@ class LocalServer(BaseServer):
         while status:
             msg = message.heartbeat_message()
             status = self.send(msg)
-            time.sleep(1)
+            time.sleep(15)
 
     def read_remote_server(self):
         while True:
@@ -80,6 +80,7 @@ class LocalServer(BaseServer):
             if msg is None:
                 continue
 
+            print(self.app_client.get(msg.id), self.app_client)
             proxy = self.app_client[msg.id]
             proxy.read_from_local_server_write_to_app_client(msg)
 

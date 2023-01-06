@@ -1,108 +1,161 @@
-class Server(BaseServer):
+import threading
+import socket
+import selectors
+import logging
+
+from .proxy.remote import RemoteProxy
+from . import util, message, base
+
+
+class Connection():
+
+    def __init__(self, _id: int, serve: socket.socket, app: socket.socket):
+        pass
+
+
+class ConnectionSet():
+
+    def __init__(self):
+        self.conn = {}
+
+
+class RemoteServer(base.BaseServer):
+    '''远端服务
+    1. 打开服务端口, 准备接受 local server 的连接请求
+    2. 接受 local server 发过来的数据包, 并转发到特定的 remote app
+    '''
 
     def __init__(self, cfg_path):
-        super(Server, self).__init__()
+        super(RemoteServer, self).__init__()
 
-        config = self.load_config(cfg_path)
+        self.config = self.load_config(cfg_path)
 
-        self.config = config
-        # 服务监听 地址:端口
-        host, port = config.get('bind').split(":")
+        self.sock = None
+        self.lock = threading.Lock()
 
-        self.host = host
-        self.port = int(port)
+        self.sel = selectors.DefaultSelector()
+        self.app_sel = selectors.DefaultSelector()
+        self.conns: dict[int, socket.socket] = {}
 
-        # 远程服务端
-        self.remote_server = {}
+        # app_server 保存了 remote server 和 app server 之间的 sock 信息
+        # 因为数据还需要传回到 local server, 因此还会记录对应的 local/remote server 之间的 sock
+        # value 里面第一个套接字是 local/remote, 第二个是 remote/app
+        self.app_server: dict[int, tuple[socket.socket, socket.socket]] = {}
 
-    def __str__(self):
-        return "Server({}:{})".format(self.host, self.port)
+    def init_conn_to_app_server(self, conn: socket.socket, _id, port):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(('0', port))
 
-    def remove_remote_server(self, sock):
+        self.app_server[_id] = (conn, sock)
+        self.app_sel.register(sock, selectors.EVENT_READ, data=2)
+
+    def close_conn_to_app_server(self, _id):
+        _, sock = self.app_server[_id]
+        del self.app_server[_id]
+        self.app_sel.unregister(sock)
         sock.close()
 
-        nameList = list(self.remote_server)
-        for name in nameList:
-            s = self.remote_server.get(name)
-            if s != sock:
-                continue
+    def write_to_app_server(self, _id, data):
+        _, sock = self.app_server[_id]
+        sock.send(data)
 
-            self.remote_server.pop(name, None)
+    def send_message(self, sock, msg):
+        logging.debug(f"sending {msg} to {sock}")
+        _msg = msg.encode()
+        sock.send(_msg)
 
-    def initial_remote_server(self, sock, name):
-        '''这个消息是远程服务端发送给服务端的'''
-        name = name.decode('utf-8')
-        self.remote_server[name] = sock
-        return name
+    def write_back_to_local_server(self, sock):
+        data = sock.recv(1024)
+        if len(data) <= 0:
+            # 关闭连接
+            return
 
-    def get_remote_pair_sock(self, sock_list, _id):
-        info = self.conn_list[_id]
-        name = info.get("remote_server_name")
-        return self.remote_server.get(name)
+        _id = None
+        conn = None
 
-    def register_connection(self, remote_name, port, _id, sock):
-        remote_server = self.remote_server.get(remote_name)
-        if not remote_server:
-            sock.close()
-            raise Exception("remote server '{}' not ready for connection!".format(remote_name))
+        for x, (c, s) in self.app_server.items():
+            if s == sock:
+                _id = x
+                conn = c
+                break
 
-        self.conn_list[_id] = {
-            "id": _id,
-            "remote_server_name": remote_name,
-            "port": port,
-            "sock": sock,
-        }
+        msg = message.data_message(data, _id=_id)
+        self.send_message(conn, msg)
 
-        # 向远程服务端发送初始化连接请求
+    def dispatch_message(self, sock: socket.socket, msg: message.Message):
+        if msg.ins == message.InsInitialConnection:
+            self.init_conn_to_app_server(sock, msg.id, msg.port)
+        elif msg.ins == message.InsData:
+            self.write_to_app_server(msg.id, msg.data)
+        elif msg.ins == message.InsCloseConnection:
+            self.close_conn_to_app_server(msg.id)
+        elif msg.ins == message.InsHeartbeat:
+            logging.debug(f"heartbeat message received from {sock}")
+
+    def service_connection(self, key, mask):
+        sock = key.fileobj
+
+        if mask & selectors.EVENT_READ:
+            msg = message.fetch_message(sock)
+            if msg is not None:
+                self.dispatch_message(sock, msg)
+
+    def service_app_connection(self, key, mask):
+        sock = key.fileobj
+
+        if mask & selectors.EVENT_READ:
+            self.write_back_to_local_server(sock)
+
+    def accept_wrapper(self, sock: socket.socket):
+        conn, addr = sock.accept()
+        logging.info(f"{self} received connection from {addr}")
+
+        conn.setblocking(False)
+        self.app_sel.register(conn, selectors.EVENT_READ, data=1)
+
+    def swap(self):
         try:
-            data = self.build_initial_connection_message(_id, port)
-            remote_server.send(data)
-        except Exception as e:
-            self.remove_remote_server(remote_server)
+            while True:
+                events = self.app_sel.select(timeout=None)
+                for key, mask in events:
+                    if key.data == 1:
+                        self.service_connection(key, mask)
+                    else:
+                        self.service_app_connection(key, mask)
+        except KeyboardInterrupt:
+            print("Caught keyboard interrupt, exiting")
+        finally:
+            self.app_sel.close()
 
-    def main_loop(self):
-        cnt = 1
-        while True:
-            remote_sock = [sock for (name, sock) in self.remote_server.items() if sock]
-            try:
-                print("main loop: {}".format(cnt))
-                cnt += 1
-                self._main_loop(remote_sock)
-            except UnableReadSocketException as e:
-                print("remote server conncetion closed: {}".format(e.message))
-                self.remove_remote_server(e.sock)
+    def _serve(self):
+        # remote server socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        _addr = self.config.get("bind")
+        ip, port = util.parse_ip_port(_addr)
+
+        sock.bind((ip, port))
+        sock.listen()
+        sock.setblocking(False)
+
+        self.sel.register(sock, selectors.EVENT_READ, data=None)
+
+        logging.info(f"remote server {self} start to accepting connections")
+
+        try:
+            while True:
+                events = self.sel.select(timeout=None)
+                for key, mask in events:
+                    self.accept_wrapper(key.fileobj)
+        except KeyboardInterrupt:
+            print("Caught keyboard interrupt, exiting")
+        finally:
+            self.sel.close()
 
     def serve(self):
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind((self.host, self.port))
-        server.listen(5)
+        swap = threading.Thread(target=self.swap)
+        swap.daemon = True
+        swap.start()
 
-        print("{} start to accepting connections".format(self))
-
-        while True:
-            conn, addr = server.accept()
-            name = self.parse_message(conn)  # 第一个消息应该是 InitRemoteServer
-            print("remote server {}, name: {} connected".format(addr, name))
-
-    def start(self):
-        # 初始化服务, 接受来自目标服务器的请求, 将来数据可以转发到目标机器
-        threads = []
-
-        st = threading.Thread(target=self.serve)
-        threads.append(st)
-
-        # 启动本地代理端口监听服务
-        for proxy_cfg in self.config.get('proxy'):
-            remote_name = proxy_cfg.get('remote_name')
-            for port_cfg in proxy_cfg.get('port_list'):
-                proxy = Proxy(server, remote_name, port_cfg)
-                t = threading.Thread(target=proxy.run)
-                threads.append(t)
-
-        # 开启主循环
-        t = threading.Thread(target=self.main_loop)
-        threads.append(t)
-
-        for t in threads:
-            t.start()
+        self._serve()

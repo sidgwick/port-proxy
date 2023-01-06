@@ -3,20 +3,7 @@ import socket
 import selectors
 import logging
 
-from .proxy.remote import RemoteProxy
 from . import util, message, base
-
-
-class Connection():
-
-    def __init__(self, _id: int, serve: socket.socket, app: socket.socket):
-        pass
-
-
-class ConnectionSet():
-
-    def __init__(self):
-        self.conn = {}
 
 
 class RemoteServer(base.BaseServer):

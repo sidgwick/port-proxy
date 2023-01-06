@@ -19,9 +19,11 @@ class LocalServer(BaseServer):
         super(LocalServer, self).__init__()
 
         self.config = self.load_config(cfg_path)
+
         self.sock = None
         self.lock = threading.Lock()
-        self.proxy_server = {}
+
+        self.app_client: dict[int, Proxy] = {}
 
     def init_remote_server(self):
         if self.sock != None:
@@ -41,6 +43,14 @@ class LocalServer(BaseServer):
         proxy = Proxy(_id, self, cfg)
         proxy.start()
         return proxy
+
+    def register_app_client_conn(self, proxy: Proxy, sock: socket.socket):
+        _id = util.sock_id(sock)
+        self.app_client[_id] = proxy
+
+    def unregister_app_client_conn(self, sock: socket.socket):
+        _id = util.sock_id(sock)
+        del self.app_client[_id]
 
     def send(self, msg: message.Message):
         self.lock.acquire()
@@ -62,11 +72,16 @@ class LocalServer(BaseServer):
         while status:
             msg = message.heartbeat_message()
             status = self.send(msg)
-
             time.sleep(1)
 
-    def proxy_register(self, _id, proxy):
-        self.proxy_server[_id] = proxy
+    def read_remote_server(self):
+        while True:
+            msg = message.fetch_message(self.sock)
+            if msg is None:
+                continue
+
+            proxy = self.app_client[msg.id]
+            proxy.read_from_local_server_write_to_app_client(msg)
 
     def serve(self):
         '''启动 local server'''
@@ -77,13 +92,17 @@ class LocalServer(BaseServer):
         for _id, cfg in enumerate(proxy_list):
             logging.info(f"启动本地 proxy server, proxy_id={_id}, proxy_config={cfg}")
 
-            proxy = self.init_proxy_server(_id, cfg)
-            self.proxy_register(_id, proxy)
+            self.init_proxy_server(_id, cfg)
 
         # 维持与 remote server 的心跳
         heartbeat = threading.Thread(target=self.heartbeat)
         heartbeat.daemon = True
         heartbeat.start()
+
+        # 尝试从 remote server 获取数据, 并按照响应的内容分发到 local proxy
+        read_remote_server = threading.Thread(target=self.read_remote_server)
+        read_remote_server.daemon = True
+        read_remote_server.start()
 
         # 永远服务下去
         heartbeat.join()

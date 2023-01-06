@@ -23,9 +23,9 @@ def sock_id(sock: socket.socket):
 
 
 def six_bytes_id_to_int(data):
-    _id_a = struct.unpack("!L", data[:4])[0]
-    _id_b = struct.unpack("!H", data[4:6])[0]
-    return (_id_a << 16) + _id_b
+    ip = struct.unpack("!L", data[:4])[0]
+    port = struct.unpack("!H", data[4:6])[0]
+    return (ip << 16) + port
 
 
 def send_data(sock, data):

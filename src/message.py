@@ -1,4 +1,9 @@
+from __future__ import annotations
 import struct
+import socket
+
+from .exception import UnableReadSocketException
+from . import util
 '''
 一条消息由 <指令(16bit) + 目标端口(16bit) + 连接id(48bit) + 数据长度(32bit) + 数据> 共同组成.
 
@@ -13,26 +18,64 @@ close_connection + _id
 '''
 
 # 数据交换指令
-InsInitialRemoteServer = 0x0000
 InsInitialConnection = 0x0001
 InsHeartbeat = 0x0002
 InsData = 0x0003
 InsCloseConnection = 0x0004
 
 
+def fetch_message(sock: socket.socket) -> Message:
+    '''从 sock 里面获取完整的 message 数据包'''
+    data = sock.recv(2)
+    if len(data) < 2:
+        msg = f"期望能读取到最好 16 bits 的指令数据, 实际读到内容 {data}"
+        raise UnableReadSocketException(msg, sock)
+
+    ins = struct.unpack("!H", data)[0]
+
+    if ins == InsInitialConnection:
+        data = sock.recv(8)
+        data = struct.unpack("!Q", data)[0]
+        _id = (data & 0xFFFFFFFFFFFF0000) >> 16
+        port = data & 0x000000000000FFFF
+        msg = Message(ins=InsInitialConnection, _id=_id, port=port)
+    elif ins == InsData:
+        data = sock.recv(10)
+        _id = util.six_bytes_id_to_int(data[:6])
+
+        length = struct.unpack("!L", data[6:])[0]
+        data = sock.recv(length)
+        if len(data) != length:
+            msg = f"未能从数据交换指令中读取到一个完整的数据包 data_length={length}"
+            raise UnableReadSocketException(msg, sock)
+
+        msg = Message(InsData, _id=_id, data=data)
+    elif ins == InsCloseConnection:
+        data = sock.recv(6)
+        _id = util.six_bytes_id_to_int(data)
+        msg = Message(InsCloseConnection, _id=_id, port=port)
+    elif ins == InsHeartbeat:
+        msg = Message(InsHeartbeat)
+    else:
+        raise Exception("Unknown data swap instruction: 0x{:X}".format(ins))
+
+
 def heartbeat_message():
     return Message(InsHeartbeat)
 
 
-def initial_connection_message(_id, port):
+def initial_connection_message(sock: socket.socket, port):
+    _id = util.sock_id(sock)
     return Message(InsInitialConnection, _id=_id, port=port)
 
 
-def close_connection_message(_id, port):
+def close_connection_message(sock: socket.socket, port):
+    _id = util.sock_id(sock)
     return Message(InsCloseConnection, _id=_id, port=port)
 
 
-def data_message(_id, data):
+def data_message(sock: socket.socket, data):
+    _id = util.sock_id(sock)
     return Message(InsData, _id=_id, data=data)
 
 
@@ -56,8 +99,6 @@ class Message():
             _type = "InsInitialConnection"
         elif self.ins == InsData:
             _type = "InsData"
-        elif self.ins == InsInitialRemoteServer:
-            _type = "InsInitialRemoteServer"
         elif self.ins == InsCloseConnection:
             _type = "InsCloseConnection"
 
@@ -79,16 +120,7 @@ class Message():
             length = struct.pack("!L", len(self.data))
             return ins_and_id + length + self.data
 
-        if self.ins == InsInitialRemoteServer:
-            name = ""
-            ins = struct.pack("!H", InsInitialRemoteServer)
-            length = struct.pack("!L", len(name))
-            return ins + length + name.encode("utf-8")
-
         if self.ins == InsCloseConnection:
             ins_and_id = (InsCloseConnection << 48) + self.id
             ins_and_id = struct.pack("!Q", ins_and_id)
             return ins_and_id
-
-    def decode():
-        pass

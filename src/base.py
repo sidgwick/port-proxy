@@ -18,26 +18,6 @@ class BaseServer(object):
             config = yaml.load(fh.read(), Loader=yaml.Loader)
             return config
 
-    def get_fdset(self, sock_list):
-        res = sock_list[:]
-
-        for conn in self.conn_list.values():
-            res.append(conn.get("sock"))
-
-        return res
-
-    def get_sock(self, _id) -> socket.socket:
-        conn = self.conn_list.get(_id, {})
-        return conn.get("sock")
-
-    def get_sock_id(self, sock):
-        for _id, conn in self.conn_list.items():
-            s = conn.get("sock")
-            if s == sock:
-                return _id
-
-        return None
-
     def initial_remote_server(self, sock, name):
         '''这个消息是远程服务端发送给服务端的'''
         raise Exception("Server must override initial_remote_server")
@@ -75,71 +55,6 @@ class BaseServer(object):
         # print("data received {}, fetch length: {}".format(length, l))
         if l == 0:
             return -1
-
-    def parse_message(self, sock):
-        # 指令长度 16 位, 目标端口 16 位, _id 48 位, length 32 位
-        # initial_remote_server + length + name
-        # initial_connection + _id + target port
-        # heartbeat
-        # data + _id + length
-        # close_connection + _id
-        data = sock.recv(2)
-        if len(data) < 2:
-            msg = "Expect 16bits instructions, found: {}".format(data)
-            raise UnableReadSocketException(msg, sock)
-
-        ins = struct.unpack("!H", data)[0]
-
-        if ins == InsInitialRemoteServer:
-            data = sock.recv(4)
-            length = struct.unpack("!L", data)[0]
-            name = sock.recv(length)
-            return self.initial_remote_server(sock, name)
-        elif ins == InsInitialConnection:
-            data = sock.recv(8)
-            data = struct.unpack("!Q", data)[0]
-            _id = (data & 0xFFFFFFFFFFFF0000) >> 16
-            port = data & 0x000000000000FFFF
-            self.initial_application_connection(sock, port, _id)
-        elif ins == InsData:
-            data = sock.recv(10)
-            _id = six_bytes_id_to_int(data[:6])
-            length = struct.unpack("!L", data[6:])[0]
-            return self.swap_data(sock, _id, length)
-        elif ins == InsCloseConnection:
-            data = sock.recv(6)
-            _id = six_bytes_id_to_int(data)
-            self.close_application_connection(_id)
-        elif ins == InsHeartbeat:
-            pass
-        else:
-            raise Exception("Unknown data swap instruction: 0x{:X}".format(ins))
-
-    def build_initial_remote_server_message(self, name):
-        ins = struct.pack("!H", InsInitialRemoteServer)
-        length = struct.pack("!L", len(name))
-        return ins + length + name.encode("utf-8")
-
-    def build_initial_connection_message(self, identity, port):
-        ins_and_id = (InsInitialConnection << 48) + identity
-        ins_and_id = struct.pack("!Q", ins_and_id)
-        _port = struct.pack("!H", port)
-        return ins_and_id + _port
-
-    def build_close_connection_message(self, identity):
-        ins_and_id = (InsCloseConnection << 48) + identity
-        ins_and_id = struct.pack("!Q", ins_and_id)
-        return ins_and_id
-
-    def build_data_message(self, identity=None):
-
-        def _build_data_message(data):
-            ins_and_id = (InsData << 48) + identity
-            ins_and_id = struct.pack("!Q", ins_and_id)
-            length = struct.pack("!L", len(data))
-            return ins_and_id + length + data
-
-        return _build_data_message
 
     def delete_conncetion(self, _id):
         print("connection {} closed and delete it now".format(_id))

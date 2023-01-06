@@ -9,4 +9,4 @@ if __name__ == '__main__':
     cfg_path = sys.argv[1]
 
     server = LocalServer(cfg_path)
-    server.start()
+    server.serve()

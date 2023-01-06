@@ -1,5 +1,23 @@
-def ip_port_to_int(_ip, port):
-    ip = struct.unpack("!I", socket.inet_aton(_ip))[0]
+import struct
+import socket
+
+
+def parse_ip_port(addr):
+    parts = addr.split(':')
+
+    ip = '0.0.0.0'
+    _port = parts[0]
+
+    if len(parts) == 2:
+        ip, _port = parts
+
+    port = int(_port)
+    return ip, port
+
+
+def sock_id(sock: socket.socket):
+    ip, port = sock.getpeername()
+    ip = struct.unpack("!I", socket.inet_aton(ip))[0]
 
     return (ip << 16) + int(port)
 

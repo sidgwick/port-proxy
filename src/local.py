@@ -3,8 +3,8 @@ import socket
 import time
 import logging
 
-from .message import heartbeat_message
-from .proxy import Proxy
+from . import util, message
+from .proxy.proxy import Proxy
 from .base import BaseServer
 
 
@@ -29,8 +29,7 @@ class LocalServer(BaseServer):
             self.sock = None
 
         remote_server = self.config.get("remote-server")
-        ip, _port = remote_server.split(':')
-        port = int(_port)
+        ip, port = util.parse_ip_port(remote_server)
 
         logging.info(f"建立 local server -> remote server 的连接, remote_server={remote_server}")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -39,17 +38,19 @@ class LocalServer(BaseServer):
         return sock
 
     def init_proxy_server(self, _id, cfg):
-        proxy = Proxy(self, _id, cfg)
+        proxy = Proxy(_id, self, cfg)
         proxy.start()
         return proxy
 
-    def send(self, message):
+    def send(self, msg: message.Message):
         self.lock.acquire()
 
         try:
-            self.sock.send(message)
+            logging.debug(f"data send to remote server {msg}")
+            _msg = msg.encode()
+            self.sock.send(_msg)
         except Exception as e:
-            logging.error(f"client heartbeat send error: {e}")
+            logging.error(f"data send to remote server send error: {e}")
             return False
 
         self.lock.release()
@@ -59,15 +60,15 @@ class LocalServer(BaseServer):
         '''发送心跳包给 remote server, 一秒钟发送一个'''
         status = True
         while status:
-            logging.debug("heartbeat heartbeat send")
-            message = heartbeat_message()
-            status = self.send(message)
+            msg = message.heartbeat_message()
+            status = self.send(msg)
+
             time.sleep(1)
 
     def proxy_register(self, _id, proxy):
         self.proxy_server[_id] = proxy
 
-    def start(self):
+    def serve(self):
         '''启动 local server'''
         self.sock = self.init_remote_server()
 
@@ -81,6 +82,7 @@ class LocalServer(BaseServer):
 
         # 维持与 remote server 的心跳
         heartbeat = threading.Thread(target=self.heartbeat)
+        heartbeat.daemon = True
         heartbeat.start()
 
         # 永远服务下去

@@ -102,23 +102,18 @@ class LocalServer(BaseServer):
                 time.sleep(15)
 
     def read_remote_server(self, sock: ThunnelConnection):
-        msg = None
+        msg_list = message.fetch_message_list(sock)
 
-        try:
-            msg = message.fetch_message(sock)
-        except Exception as e:
-            logging.error(f"fetch message from remote server error {e}")
+        if len(msg_list) == 0:
             logging.info("restarting connection to remote server")
             cfg = self.close_thunnel(sock)
             self.init_remote_server(cfg)
 
-        if msg is None:
-            return
+        for msg in msg_list:
+            logging.debug(f"received message from remote server {msg}")
 
-        logging.debug(f"received message from remote server {msg}")
-
-        _, proxy = self.app_client[msg.id]
-        proxy.read_from_local_server_write_to_app_client(msg)
+            _, proxy = self.app_client[msg.id]
+            proxy.read_from_local_server_write_to_app_client(msg)
 
     def serve(self):
         '''启动 local server'''

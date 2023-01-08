@@ -134,23 +134,120 @@ class WebsocketFrame():
         return cl
 
 
+class FrameCache():
+
+    def __init__(self, sock: socket.socket):
+        super(FrameCache, self).__init__()
+        self.sock = sock
+
+        self.buffer: bytes = b''
+        self.data: bytes = b''
+        self.frame: WebsocketFrame = None
+
+    def set_socket(self, sock: socket.socket):
+        self.sock = sock
+
+    def add_cache(self, data: bytes):
+        self.buffer += data
+
+    def read(self, n):
+        if n != 0 and len(self.data) > n:
+            res = self.data[:n]
+            self.data = self.data[n:]
+            return res
+
+        if self.sock is None:
+            return None
+
+        self.readall_from_socket()
+        self.decode_all_frame()
+
+        length = len(self.data)
+        if length == 0:
+            return None
+
+        if length < n:
+            n = length
+
+        res = self.data[:n]
+        self.data = self.data[n:]
+        return res
+
+    def readall_from_socket(self):
+        try:
+            self._readall()
+        except BlockingIOError as e:
+            logging.debug(f"read all from socket error: {e}")
+
+    def _readall(self):
+        _data = bytearray()
+        while True:
+            tmp = self.sock.recv(1024)
+            # print(f'recv_frame data read: {tmp}')
+            _data.extend(tmp)
+            if len(tmp) < 1024:
+                break
+
+        self.buffer += _data
+
+    def decode_all_frame(self):
+        data = self.buffer
+        frame = self.frame
+
+        while True:
+            data, frame = self._decode_all_frame(data, frame)
+            if frame is None:
+                break
+
+            if frame.fin:
+                self.data += frame.data
+                frame = None
+
+        self.buffer = data
+        self.frame = frame
+
+    def _decode_all_frame(self, data: bytes, frame: WebsocketFrame) -> tuple[bytes, WebsocketFrame]:
+        if len(data) == 0:
+            return data, None
+
+        _cl = None
+        if frame is None:
+            _cl, frame = decode(data)
+
+        # 无法再从缓存中解析出数据帧, 就可以退出函数了
+        if frame is None:
+            return data, None
+
+        # 更正消费掉的数据
+        data = data[_cl:]
+
+        if not frame.fin:
+            cl = frame.append(data)
+            data = data[cl:]
+
+        return data, frame
+
+
 class WebsocketConnection(ThunnelConnection):
 
     def __init__(self, name='', sock: socket.socket = None):
-        super(WebsocketConnection, self).__init__()
-
         self.name = name
         self.sock = sock
 
         self.ip = None
         self.port = None
 
-        self.buffer: bytes = b''
-        self.recv_data: bytes = b''
-        self.frame: WebsocketFrame = None
+        self.cache = FrameCache(sock)
 
     def __str__(self):
         return f'ws://{self.ip}:{self.port}'
+
+    def set_socket(self, sock: socket.socket):
+        self.sock = sock
+        self.cache.set_socket(sock)
+
+    def add_cache(self, data: bytes):
+        self.cache.add_cache(data)
 
     def alive_check(self):
         if self.sock is None:
@@ -176,23 +273,7 @@ class WebsocketConnection(ThunnelConnection):
         return res
 
     def recv(self, n=1024):
-        if n != 0 and len(self.recv_data) > n:
-            res = self.recv_data[:n]
-            self.recv_data = self.recv_data[n:]
-            return res
-
-        if self.sock is None:
-            return None
-
-        print(f'aaaaaaaa: {self.recv_data}')
-        self.recv_frame()
-        print(f'bbbbbbbb: {self.recv_data}')
-
-        if n > len(self.recv_data):
-            n = len(self.recv_data)
-
-        res = self.recv_data[:n]
-        self.recv_data = self.recv_data[n:]
+        res = self.cache.read(n)
         return res
 
     def disconnect(self):
@@ -200,59 +281,6 @@ class WebsocketConnection(ThunnelConnection):
             return
 
         self.sock.close()
-
-    def recv_frame(self):
-
-        def read_all(sock: socket.socket) -> bytes:
-            _data = bytearray()
-            while True:
-                tmp = self.sock.recv(1024)
-                print(f'recv_frame data read: {tmp}')
-                _data.extend(tmp)
-                if len(tmp) < 1024:
-                    break
-
-            return _data
-
-        def decode_all(data: bytes, frame: WebsocketFrame) -> tuple[bytes, WebsocketFrame]:
-            if len(data) == 0:
-                return data, None
-
-            _cl = None
-            if frame is None:
-                _cl, frame = decode(data)
-
-            # 无法再从缓存中解析出数据帧, 就可以退出函数了
-            if frame is None:
-                return data, None
-
-            # 更正消费掉的数据
-            data = data[_cl:]
-
-            if frame.fin:
-                self.recv_data += frame.data
-                frame = None
-
-            if frame and frame.fin:
-                cl = frame.append(data)
-                data = data[cl:]
-
-            # 继续解析后续的数据帧
-            data, frame = decode_all(data, frame)
-            return data, frame
-
-        _data = b''
-        try:
-            # 从套接字中读取全部数据, 存到对象缓存中
-            _data = read_all(self.sock)
-        except BlockingIOError as e:
-            print(f"socket buffer empty, use local buffer")
-
-        try:
-            data = self.buffer + _data
-            self.buffer, self.frame = decode_all(data, self.frame)
-        except WebsocketReadError as e:
-            print(f"Error decoding websocket frame, error={e}")
 
 
 class Client(WebsocketConnection, ThunnelClient):
@@ -262,28 +290,27 @@ class Client(WebsocketConnection, ThunnelClient):
         self.ip = ip
         self.port = port
         self.name = name
-        self.sock = None
+        self.sock: socket.socket = None
 
     def connect(self):
         '''connect to remote server'''
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect((self.ip, self.port))
 
-        self.sock = sock
+        self.set_socket(sock)
         self.http_upgrade_request()
         self.websocket_client_handshake()
         sock.setblocking(False)
 
     def websocket_client_handshake(self):
-        sock = self.sock
-        data = sock.recv(1024)
+        data = self.sock.recv(1024)
 
         logging.info(f"websocket handshake response :\n{data}")
 
         first, headers, body = util.parse_http(data)
 
         if first == "HTTP/1.1 101 Switching Protocols":
-            self.buffer += body
+            self.add_cache(body)
             return
 
         if first == "HTTP/1.1 400 Bad Request":
@@ -297,7 +324,7 @@ class Client(WebsocketConnection, ThunnelClient):
               "Sec-WebSocket-Key: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n"
 
         req = req.encode()
-        n = self.sock.send(req)
+        self.sock.send(req)
         logging.info(f"websocket request send:\n{req}")
 
 
@@ -332,7 +359,7 @@ class Server(ThunnelServer):
 
         conn = WebsocketConnection(sock=sock)
         data = self.websocket_server_handshake(sock)
-        conn.buffer = data
+        conn.add_cache(data)
 
         sock.setblocking(False)
         return conn

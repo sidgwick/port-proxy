@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import struct
 import socket
 
@@ -24,14 +25,31 @@ InsData = 0x0003
 InsCloseConnection = 0x0004
 
 
+def fetch_message_list(sock: thunnel.ThunnelConnection) -> Message:
+    msg_list = []
+
+    try:
+        while True:
+            msg = fetch_message(sock)
+            if msg is None:
+                break
+
+            msg_list.append(msg)
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        logging.error(f"fetch message from remote server error {e}")
+
+    return msg_list
+
+
 def fetch_message(sock: thunnel.ThunnelConnection) -> Message:
     '''从 sock 里面获取完整的 message 数据包'''
     sock.alive_check()
 
     data = sock.recv(2)
     if data is None:
-        msg = f"期望能读取到最好 16 bits 的指令数据, 实际读到内容"
-        raise UnableReadSocketException(msg, sock)
+        return None
 
     msg = None
     ins = struct.unpack("!H", data)[0]

@@ -105,14 +105,12 @@ class RemoteServer(base.BaseServer):
         sock: ThunnelConnection = key.fileobj
 
         if mask & selectors.EVENT_READ:
-            msg = None
-            try:
-                msg = message.fetch_message(sock)
-            except Exception as e:
-                logging.error(f"Failed to fetch message, error={e}")
+            msg_list = message.fetch_message_list(sock)
+            if len(msg_list) == 0:
+                logging.error(f"Failed to fetch message")
                 self.close_swap_connection(sock)
 
-            if msg is not None:
+            for msg in msg_list:
                 self.dispatch_message(sock, msg)
 
     def service_app_connection(self, key, mask):

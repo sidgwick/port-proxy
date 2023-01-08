@@ -5,6 +5,12 @@ from abc import ABC, abstractmethod
 
 class ThunnelConnection(ABC):
 
+    @property
+    @abstractmethod
+    def name(self):
+        '''获取套接字名字'''
+        return NotImplementedError
+
     @abstractmethod
     def alive_check(self):
         '''检查链接状态'''

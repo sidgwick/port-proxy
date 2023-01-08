@@ -149,8 +149,14 @@ class RemoteServer(base.BaseServer):
     def _serve(self):
         # remote server socket
         addr = self.config.get("bind")
+        protocol, ip, port = util.parse_xaddr(addr)
 
-        t = tcp.Server(addr)
+        t = None
+        if protocol == 'tcp':
+            t = tcp.Server(ip=ip, port=port)
+        elif protocol == 'ws':
+            t = ws.Server(ip=ip, port=port)
+
         t.serve()
 
         self.sel.register(t, selectors.EVENT_READ, data=None)

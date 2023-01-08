@@ -11,5 +11,10 @@ class UnableReadSocketException(Exception):
         return f"{self.message}, socket={self.sock.getpeername()}"
 
 
-class TargetSocketNotExist(Exception):
-    pass
+class WebsocketReadError(Exception):
+
+    def __init__(self, message):
+        self.message = message
+
+    def __str__(self):
+        return f"WebsocketReadError({self.message})"

@@ -29,8 +29,8 @@ def fetch_message(sock: thunnel.ThunnelConnection) -> Message:
     sock.alive_check()
 
     data = sock.recv(2)
-    if len(data) < 2:
-        msg = f"期望能读取到最好 16 bits 的指令数据, 实际读到内容 {data}"
+    if data is None:
+        msg = f"期望能读取到最好 16 bits 的指令数据, 实际读到内容"
         raise UnableReadSocketException(msg, sock)
 
     msg = None

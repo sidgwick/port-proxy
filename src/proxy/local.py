@@ -24,6 +24,7 @@ class LocalProxy(threading.Thread):
         self.config = config
         self.local = config.get("local")
         self.remote = config.get("remote")
+        self.remote_port = config.get("remote_port")
 
         self.sel = selectors.DefaultSelector()
         self.connection: dict[int, socket.socket] = {}
@@ -33,7 +34,8 @@ class LocalProxy(threading.Thread):
         protocol = self.config.get("type")
         local = self.local
         remote = self.remote
-        return f"Proxy({_id}, {protocol}://{local}->{remote})"
+        remote_port = self.remote_port
+        return f"Proxy({_id}, {protocol}://{local}->{remote}:{remote_port})"
 
     def register_connection(self, sock: socket.socket):
         _id = util.sock_id(sock)
@@ -44,16 +46,16 @@ class LocalProxy(threading.Thread):
         del self.connection[_id]
 
     def send_to_local_server(self, msg: message.Message):
-        msg.port = self.remote
-        self.server.send(msg)
+        msg.port = self.remote_port
+        self.server.send(self.remote, msg)
 
     def init_app_client_conn(self, sock: socket.socket):
         self.register_connection(sock)
 
         # 将套接字+proxy 对象一起注册到 local server 里面, 后面 local 收到数据才知道怎么发回来
-        self.server.register_app_client_conn(self, sock)
+        self.server.register_app_client_conn(self.remote, self, sock)
 
-        msg = message.initial_connection_message(self.remote, sock=sock)
+        msg = message.initial_connection_message(self.remote_port, sock=sock)
         self.send_to_local_server(msg)
 
     def close_app_client_connection(self, sock: socket.socket):
@@ -103,7 +105,6 @@ class LocalProxy(threading.Thread):
         conn.setblocking(False)
 
         self.sel.register(conn, selectors.EVENT_READ, data=1)
-
         self.init_app_client_conn(conn)
 
     def run(self):

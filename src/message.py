@@ -3,7 +3,7 @@ import struct
 import socket
 
 from .exception import UnableReadSocketException
-from . import util
+from . import util, thunnel
 '''
 一条消息由 <指令(16bit) + 目标端口(16bit) + 连接id(48bit) + 数据长度(32bit) + 数据> 共同组成.
 
@@ -24,7 +24,7 @@ InsData = 0x0003
 InsCloseConnection = 0x0004
 
 
-def fetch_message(sock: socket.socket) -> Message:
+def fetch_message(sock: thunnel.BasicThunnel) -> Message:
     '''从 sock 里面获取完整的 message 数据包'''
     data = sock.recv(2)
     if len(data) < 2:

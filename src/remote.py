@@ -4,6 +4,7 @@ import selectors
 import logging
 
 from . import util, message, base
+from .thunnel import ThunnelServer, tcp, ws
 
 
 class RemoteServer(base.BaseServer):
@@ -17,7 +18,6 @@ class RemoteServer(base.BaseServer):
 
         self.config = self.load_config(cfg_path)
 
-        self.sock = None
         self.lock = threading.Lock()
 
         self.sel = selectors.DefaultSelector()
@@ -121,9 +121,9 @@ class RemoteServer(base.BaseServer):
         if mask & selectors.EVENT_READ:
             self.write_back_to_local_server(sock)
 
-    def accept_wrapper(self, sock: socket.socket):
+    def accept_wrapper(self, sock: ThunnelServer):
         conn, addr = sock.accept()
-        logging.info(f"{self} received connection from {addr}")
+        logging.info(f"{sock} received connection from {addr}")
 
         conn.setblocking(False)
         self.app_sel.register(conn, selectors.EVENT_READ, data=1)
@@ -149,19 +149,14 @@ class RemoteServer(base.BaseServer):
 
     def _serve(self):
         # remote server socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        addr = self.config.get("bind")
 
-        _addr = self.config.get("bind")
-        ip, port = util.parse_ip_port(_addr)
+        t = tcp.Server(addr)
+        t.serve()
 
-        sock.bind((ip, port))
-        sock.listen()
-        sock.setblocking(False)
+        self.sel.register(t, selectors.EVENT_READ, data=None)
 
-        self.sel.register(sock, selectors.EVENT_READ, data=None)
-
-        logging.info(f"remote server {self} start to accepting connections")
+        logging.info(f"RemoteServer({t}) start to accepting connections")
 
         try:
             while True:

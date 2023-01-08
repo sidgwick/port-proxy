@@ -4,6 +4,7 @@ import time
 import logging
 
 from . import util, message
+from .thunnel import ThunnelClient, tcp, ws
 from .proxy.local import LocalProxy
 from .base import BaseServer
 
@@ -20,30 +21,29 @@ class LocalServer(BaseServer):
 
         self.config = self.load_config(cfg_path)
 
-        self.sock = None
+        self.thunnel: ThunnelClient = None
         self.lock = threading.Lock()
 
         self.app_client: dict[int, LocalProxy] = {}
 
-    def init_remote_server(self):
-        if self.sock != None:
-            self.sock.close()
-            self.sock = None
+    def init_remote_server(self) -> ThunnelClient:
+        if self.thunnel != None:
+            self.thunnel.disconnect()
+            self.thunnel = None
 
-        remote_server = self.config.get("remote-server")
-        ip, port = util.parse_ip_port(remote_server)
+        addr = self.config.get("remote-server")
+        t = tcp.Client(addr)
 
         while True:
             try:
-                logging.info(f"建立 local server -> remote server 的连接, remote_server={ip}:{port}")
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((ip, port))
+                logging.info(f"建立 LocalServer -> RemoteServer({t}) 的连接")
+                t.connect()
                 break
             except Exception as e:
-                logging.error(f"建立到 remote server 连接失败: {e}, 稍后即将重试...")
+                logging.error(f"建立到 RemoteServer 连接失败: {e}, 稍后即将重试...")
                 time.sleep(2)
 
-        return sock
+        return t
 
     def init_proxy_server(self, _id, cfg):
         proxy = LocalProxy(_id, self, cfg)
@@ -64,7 +64,7 @@ class LocalServer(BaseServer):
         try:
             logging.debug(f"data send to remote server {msg}")
             _msg = msg.encode()
-            self.sock.send(_msg)
+            self.thunnel.send(_msg)
         except Exception as e:
             logging.error(f"data send to remote server send error: {e}")
             return False
@@ -85,11 +85,11 @@ class LocalServer(BaseServer):
 
         while True:
             try:
-                msg = message.fetch_message(self.sock)
+                msg = message.fetch_message(self.thunnel)
             except Exception as e:
                 logging.error(f"fetch message from remote server error {e}")
                 logging.info("restarting connection to remote server")
-                self.sock = self.init_remote_server()
+                self.thunnel = self.init_remote_server()
 
             if msg is None:
                 continue
@@ -101,7 +101,7 @@ class LocalServer(BaseServer):
 
     def serve(self):
         '''启动 local server'''
-        self.sock = self.init_remote_server()
+        self.thunnel = self.init_remote_server()
 
         # 启动所有的本地 proxy
         proxy_list = self.config.get('proxy_list')

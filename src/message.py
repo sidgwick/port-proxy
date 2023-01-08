@@ -24,8 +24,10 @@ InsData = 0x0003
 InsCloseConnection = 0x0004
 
 
-def fetch_message(sock: thunnel.BasicThunnel) -> Message:
+def fetch_message(sock: thunnel.ThunnelConnection) -> Message:
     '''从 sock 里面获取完整的 message 数据包'''
+    sock.alive_check()
+
     data = sock.recv(2)
     if len(data) < 2:
         msg = f"期望能读取到最好 16 bits 的指令数据, 实际读到内容 {data}"

@@ -4,7 +4,7 @@ import selectors
 import logging
 
 from . import util, message, base
-from .thunnel import ThunnelServer, tcp, ws
+from .thunnel import ThunnelServer, ThunnelConnection, tcp, ws
 
 
 class RemoteServer(base.BaseServer):
@@ -26,12 +26,12 @@ class RemoteServer(base.BaseServer):
         # app_server 保存了 remote server 和 app server 之间的 sock 信息
         # 因为数据还需要传回到 local server, 因此还会记录对应的 local/remote server 之间的 sock
         # value 里面第一个套接字是 local/remote, 第二个是 remote/app
-        self.app_server: dict[int, tuple[socket.socket, socket.socket]] = {}
+        self.app_server: dict[int, tuple[ThunnelConnection, socket.socket]] = {}
 
     def __str__(self):
         return f"{self.config.get('bind')}"
 
-    def init_conn_to_app_server(self, conn: socket.socket, _id, port):
+    def init_conn_to_app_server(self, conn: ThunnelConnection, _id, port):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         try:
@@ -89,7 +89,7 @@ class RemoteServer(base.BaseServer):
         msg = message.data_message(data, _id=_id)
         self.send_message(conn, msg)
 
-    def dispatch_message(self, sock: socket.socket, msg: message.Message):
+    def dispatch_message(self, sock: ThunnelConnection, msg: message.Message):
         logging.debug(f"message received from {sock.getpeername()}, message={msg}")
 
         if msg.ins == message.InsInitialConnection:
@@ -102,7 +102,7 @@ class RemoteServer(base.BaseServer):
             pass
 
     def service_connection(self, key, mask):
-        sock: socket.socket = key.fileobj
+        sock: ThunnelConnection = key.fileobj
 
         if mask & selectors.EVENT_READ:
             msg = None
@@ -122,16 +122,15 @@ class RemoteServer(base.BaseServer):
             self.write_back_to_local_server(sock)
 
     def accept_wrapper(self, sock: ThunnelServer):
-        conn, addr = sock.accept()
-        logging.info(f"{sock} received connection from {addr}")
+        conn = sock.accept()
+        logging.info(f"RemoteServer({sock}) received connection from {conn.getpeername()}")
 
-        conn.setblocking(False)
         self.app_sel.register(conn, selectors.EVENT_READ, data=1)
 
-    def close_swap_connection(self, sock: socket.socket):
+    def close_swap_connection(self, sock: ThunnelConnection):
         logging.info(f"close connection to {sock.getpeername()}")
         self.app_sel.unregister(sock)
-        sock.close()
+        sock.disconnect()
 
     def swap(self):
         try:

@@ -29,7 +29,11 @@ class LocalProxy(threading.Thread):
         self.connection: dict[int, socket.socket] = {}
 
     def __str__(self):
-        return f"Proxy<{self.id} - {self.config}>"
+        _id = self.id
+        protocol = self.config.get("type")
+        local = self.local
+        remote = self.remote
+        return f"Proxy({_id}, {protocol}://{local}->{remote})"
 
     def register_connection(self, sock: socket.socket):
         _id = util.sock_id(sock)

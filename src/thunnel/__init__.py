@@ -3,7 +3,12 @@ import socket
 from abc import ABC, abstractmethod
 
 
-class BasicThunnel(ABC):
+class ThunnelConnection(ABC):
+
+    @abstractmethod
+    def alive_check(self):
+        '''检查链接状态'''
+        return NotImplementedError
 
     @abstractmethod
     def fileno(self):
@@ -27,21 +32,21 @@ class BasicThunnel(ABC):
         '''recv data from remote server'''
         return NotImplementedError
 
-
-class ThunnelClient(BasicThunnel):
-
-    @abstractmethod
-    def connect(self):
-        '''connect to remote server'''
-        return NotImplementedError
-
     @abstractmethod
     def disconnect(self):
         '''disconnect from remote server'''
         return NotImplementedError
 
 
-class ThunnelServer(BasicThunnel):
+class ThunnelClient():
+
+    @abstractmethod
+    def connect(self):
+        '''connect to remote server'''
+        return NotImplementedError
+
+
+class ThunnelServer():
 
     @abstractmethod
     def serve(self):
@@ -49,6 +54,6 @@ class ThunnelServer(BasicThunnel):
         return NotImplementedError
 
     @abstractmethod
-    def accept(self) -> tuple[socket.socket, socket._RetAddress]:
+    def accept(self) -> ThunnelConnection:
         '''accept connections from local server'''
         return NotImplementedError

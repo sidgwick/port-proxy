@@ -2,14 +2,76 @@ from __future__ import annotations
 import socket
 
 from .. import util
-from . import ThunnelClient, ThunnelServer
+from . import ThunnelClient, ThunnelServer, ThunnelConnection
 
 
-class TcpConnect():
+class TcpConnection(ThunnelConnection):
+
+    def __init__(self, sock: socket.socket):
+        super(TcpConnection, self).__init__()
+        self.sock = sock
+
+        self.ip = None
+        self.port = None
+
+    def __str__(self):
+        return f'tcp://{self.ip}:{self.port}'
+
+    def alive_check(self):
+        if self.sock is None:
+            raise Exception('tcp connection not initialized')
+
+        return True
+
+    def fileno(self):
+        return self.sock.fileno()
+
+    def getpeername(self):
+        if self.sock is None:
+            return ''
+
+        return self.sock.getpeername()
+
+    def send(self, data):
+        res = self.sock.send(data)
+        return res
+
+    def recv(self, len=None):
+        if self.sock is None:
+            return ''
+
+        res = self.sock.recv(len)
+        return res
+
+    def disconnect(self):
+        if self.sock is None:
+            return
+
+        self.sock.close()
+
+
+class Client(TcpConnection, ThunnelClient):
 
     def __init__(self, addr):
-        super(TcpConnect, self).__init__()
+        TcpConnection.__init__(self, sock=None)
 
+        ip, port = util.parse_ip_port(addr)
+
+        self.ip = ip
+        self.port = port
+        self.sock = None
+
+    def connect(self):
+        '''connect to remote server'''
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((self.ip, self.port))
+
+        self.sock = sock
+
+
+class Server(ThunnelServer):
+
+    def __init__(self, addr):
         ip, port = util.parse_ip_port(addr)
 
         self.ip = ip
@@ -22,39 +84,6 @@ class TcpConnect():
     def fileno(self):
         return self.sock.fileno()
 
-    def getpeername(self):
-        return self.sock.getpeername()
-
-    def send(self, data):
-        res = self.sock.send(data)
-        return res
-
-    def recv(self, len=None):
-        res = self.sock.recv(len)
-        return res
-
-
-class Client(TcpConnect, ThunnelClient):
-
-    def __init__(self, addr):
-        TcpConnect.__init__(self, addr)
-
-    def connect(self):
-        '''connect to remote server'''
-
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((self.ip, self.port))
-
-    def disconnect(self):
-        '''disconnect from remote server'''
-        self.sock.close()
-
-
-class Server(TcpConnect, ThunnelServer):
-
-    def __init__(self, addr):
-        TcpConnect.__init__(self, addr)
-
     def serve(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -65,5 +94,9 @@ class Server(TcpConnect, ThunnelServer):
 
         self.sock = sock
 
-    def accept(self) -> tuple[socket.socket, socket._RetAddress]:
-        return self.sock.accept()
+    def accept(self) -> ThunnelConnection:
+        sock, _addr = self.sock.accept()
+        sock.setblocking(False)
+
+        conn = TcpConnection(sock)
+        return conn

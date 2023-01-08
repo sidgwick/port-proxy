@@ -4,7 +4,7 @@ import time
 import logging
 
 from . import util, message
-from .thunnel import ThunnelClient, tcp, ws
+from .thunnel import ThunnelConnection, tcp, ws
 from .proxy.local import LocalProxy
 from .base import BaseServer
 
@@ -21,12 +21,12 @@ class LocalServer(BaseServer):
 
         self.config = self.load_config(cfg_path)
 
-        self.thunnel: ThunnelClient = None
+        self.thunnel: ThunnelConnection = None
         self.lock = threading.Lock()
 
         self.app_client: dict[int, LocalProxy] = {}
 
-    def init_remote_server(self) -> ThunnelClient:
+    def init_remote_server(self) -> ThunnelConnection:
         if self.thunnel != None:
             self.thunnel.disconnect()
             self.thunnel = None
@@ -38,11 +38,13 @@ class LocalServer(BaseServer):
             try:
                 logging.info(f"建立 LocalServer -> RemoteServer({t}) 的连接")
                 t.connect()
-                break
             except Exception as e:
-                logging.error(f"建立到 RemoteServer 连接失败: {e}, 稍后即将重试...")
+                logging.error(f"建立 LocalServer -> RemoteServer({t}) 的连接失败: {e}, 稍后即将重试...")
                 time.sleep(2)
 
+            break
+
+        logging.info(f"建立 LocalServer -> RemoteServer({t}) 的连接成功")
         return t
 
     def init_proxy_server(self, _id, cfg):
@@ -62,11 +64,11 @@ class LocalServer(BaseServer):
         self.lock.acquire()
 
         try:
-            logging.debug(f"data send to remote server {msg}")
+            logging.debug(f"data send to RemoteServer({self.thunnel}) {msg}")
             _msg = msg.encode()
             self.thunnel.send(_msg)
         except Exception as e:
-            logging.error(f"data send to remote server send error: {e}")
+            logging.error(f"data send to RemoteServer({self.thunnel}) send error: {e}")
             return False
 
         self.lock.release()

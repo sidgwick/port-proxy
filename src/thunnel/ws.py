@@ -151,17 +151,6 @@ class FrameCache():
         self.buffer += data
 
     def read(self, n):
-        if n != 0 and len(self.data) > n:
-            res = self.data[:n]
-            self.data = self.data[n:]
-            return res
-
-        if self.sock is None:
-            return None
-
-        self.readall_from_socket()
-        self.decode_all_frame()
-
         length = len(self.data)
         if length == 0:
             return None
@@ -271,6 +260,10 @@ class WebsocketConnection(ThunnelConnection):
         frame = encode(data)
         res = self.sock.sendall(frame)
         return res
+
+    def recvall(self):
+        self.cache.readall_from_socket()
+        self.cache.decode_all_frame()
 
     def recv(self, n=1024):
         res = self.cache.read(n)

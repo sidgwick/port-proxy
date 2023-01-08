@@ -26,6 +26,7 @@ InsCloseConnection = 0x0004
 
 
 def fetch_message_list(sock: thunnel.ThunnelConnection) -> Message:
+    sock.recvall()
     msg_list = []
 
     try:

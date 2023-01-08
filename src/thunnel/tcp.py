@@ -40,6 +40,9 @@ class TcpConnection(ThunnelConnection):
         res = self.sock.send(data)
         return res
 
+    def recvall(self):
+        pass
+
     def recv(self, len=None):
         if self.sock is None:
             return None

@@ -43,6 +43,11 @@ class ThunnelConnection(ABC):
         '''disconnect from remote server'''
         return NotImplementedError
 
+    @abstractmethod
+    def recvall(self):
+        '''read all socket content to local buffer'''
+        return NotImplementedError
+
 
 class ThunnelClient():
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
-import logging
 import socket
-import time
 
 from .. import util
 from . import ThunnelClient, ThunnelServer
@@ -16,13 +14,16 @@ class TcpConnect():
 
         self.ip = ip
         self.port = port
-        self.sock = None
+        self.sock: socket.socket = None
 
     def __str__(self):
         return f'tcp://{self.ip}:{self.port}'
 
     def fileno(self):
         return self.sock.fileno()
+
+    def getpeername(self):
+        return self.sock.getpeername()
 
     def send(self, data):
         res = self.sock.send(data)

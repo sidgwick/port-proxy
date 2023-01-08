@@ -13,6 +13,11 @@ class BasicThunnel(ABC):
         return NotImplementedError
 
     @abstractmethod
+    def getpeername(self):
+        '''获取通讯中对端的名字'''
+        return NotImplementedError
+
+    @abstractmethod
     def send(self):
         '''send data to remote server'''
         return NotImplementedError

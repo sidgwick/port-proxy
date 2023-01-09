@@ -19,14 +19,14 @@ _opPingFrame = 0x9
 _opPongFrame = 0xA
 
 
-def _decode(data: bytes) -> tuple[int, WebsocketFrame]:
+def _decode(data: bytearray) -> tuple[int, WebsocketFrame]:
     '''decode frame from data
 
     Returns:
     Frame: 帧结果
     '''
 
-    def readx(l) -> tuple[bytes, bytes]:
+    def readx(l) -> tuple[bytearray, bytearray]:
         xl = len(data)
         if xl < l:
             raise WebsocketReadError(f"获取不到合法的 websocket 数据帧: {xl} < {l}")
@@ -55,9 +55,12 @@ def _decode(data: bytes) -> tuple[int, WebsocketFrame]:
     if masked:
         _data = [_data[i] ^ mask[i % 4] for i in range(length)]
 
-    frame = WebsocketFrame(fin, opcode, length=length, data=_data)
-    logging.debug(f"websocket frame found: {frame}")
-    return raw - len(data), frame
+    frame = WebsocketFrame(fin=fin, opcode=opcode, length=length, data=_data)
+
+    cl = raw - len(data)
+    logging.debug(f"websocket frame found(cl={cl}bytes): {frame}")
+
+    return cl, frame
 
 
 def decode(data: bytearray) -> tuple[int, WebsocketFrame]:
@@ -74,20 +77,23 @@ def encode(data: bytearray) -> bytearray:
     '''构造 websocket 数据帧(网络传输)'''
     result = bytearray()
 
+    if type(data) == bytes:
+        data = bytearray(data)
+
     fin = 1  # 1
     opcode = _opBinFrame
-    masked = 0
+    masked = 0x00
 
     b0 = (fin << 7 | opcode)
     b1 = masked
-    length = b''
 
+    length = b''
     _length = len(data)
 
     if _length > 0xFFFF:
         b1 |= 0x7f  # 8bytes length
         length = struct.pack('>Q', _length)
-    elif _length > 0xFF:
+    elif _length >= 0x7E:
         b1 |= 0x7e  # 2bytes length
         length = struct.pack('>H', _length)
     else:
@@ -96,7 +102,10 @@ def encode(data: bytearray) -> bytearray:
     result = bytearray()
     result.append(b0)
     result.append(b1)
-    result.extend(length)
+
+    if len(length):
+        result.extend(length)
+
     result.extend(data)
 
     return result
@@ -104,7 +113,7 @@ def encode(data: bytearray) -> bytearray:
 
 class WebsocketFrame():
 
-    def __init__(self, fin=False, opcode=None, mask=None, length=0, data=b''):
+    def __init__(self, fin=False, opcode=None, mask=None, length=0, data: bytearray = []):
         self.fin: bool = fin
         self.rsv1 = None
         self.rsv2 = None
@@ -113,12 +122,12 @@ class WebsocketFrame():
         self.mask = mask
 
         self.length: int = length
-        self.data: bytes = data
+        self.data: bytearray = data
 
     def __str__(self):
         return f"WSFrame({self.fin}, {self.length})"
 
-    def append(self, data: bytes) -> int:
+    def append(self, data: bytearray) -> int:
         '''往非结束数据帧里面追加数据'''
         if len(data) == 0:
             return 0
@@ -155,7 +164,6 @@ class FrameCache():
 
     def read(self, n):
         length = len(self.data)
-        print('xxxxxxx', length, self.data)
         if length == 0:
             return None
 
@@ -199,9 +207,9 @@ class FrameCache():
 
     def _decode_all_frame(self, data: bytearray, frame: WebsocketFrame) -> tuple[bytearray, WebsocketFrame]:
         if len(data) == 0:
-            return data, None
+            return data, frame
 
-        _cl = None
+        _cl = 0
         if frame is None:
             _cl, frame = decode(data)
 
@@ -260,10 +268,8 @@ class WebsocketConnection(ThunnelConnection):
 
     def send(self, data):
         frame = encode(data)
-        x, _frame = decode(frame)
-        logging.debug(f"send data over websocket: {x}, {_frame}")
-        res = self.sock.sendall(frame)
-        return res
+        self.sock.sendall(frame)
+        return None
 
     def recvall(self):
         self.cache.readall_from_socket()
@@ -302,7 +308,7 @@ class Client(WebsocketConnection, ThunnelClient):
     def websocket_client_handshake(self):
         data = self.sock.recv(1024)
 
-        logging.info(f"websocket handshake response :\n{data}")
+        # logging.info(f"websocket handshake response :\n{data}")
 
         first, headers, body = util.parse_http(data)
 
@@ -311,6 +317,7 @@ class Client(WebsocketConnection, ThunnelClient):
             return
 
         if first == "HTTP/1.1 400 Bad Request":
+            logging.error(f"bad websocket handshake response :\n{data}")
             self.sock.close()
 
     def http_upgrade_request(self):
@@ -322,7 +329,7 @@ class Client(WebsocketConnection, ThunnelClient):
 
         req = req.encode()
         self.sock.send(req)
-        logging.info(f"websocket request send:\n{req}")
+        # logging.info(f"websocket request send:\n{req}")
 
 
 class Server(ThunnelServer):
@@ -365,7 +372,7 @@ class Server(ThunnelServer):
         '''初始化 websocket 链接, 完成握手等动作, 为后续的接收/发送数据做准备'''
         data = sock.recv(1024)
 
-        logging.debug(f"websocket handshake request:\n{data}")
+        # logging.debug(f"websocket handshake request:\n{data}")
 
         first, headers, body = util.parse_http(data)
         if first != "GET / HTTP/1.1":
@@ -405,7 +412,7 @@ class Server(ThunnelServer):
                f"Sec-WebSocket-Accept: {resp_key}\r\n\r\n"
 
         resp = resp.encode()
-        logging.debug(f"websocket handshake response:\n{resp}")
+        # logging.debug(f"websocket handshake response:\n{resp}")
         sock.send(resp)
 
         # 正常情况下 body 是没有数据的, 因为握手完成之前应该没有帧数据

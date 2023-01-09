@@ -5,6 +5,9 @@ from abc import ABC, abstractmethod
 
 class ThunnelConnection(ABC):
 
+    def __init__(self):
+        self.handlers = []
+
     @property
     @abstractmethod
     def name(self):
@@ -47,6 +50,16 @@ class ThunnelConnection(ABC):
     def recvall(self):
         '''read all socket content to local buffer'''
         return NotImplementedError
+
+    def register_message_handler(self, handler):
+        '''注册指令到来之后的处理函数'''
+        self.handlers.append(handler)
+        return len(self.handlers) - 1
+
+    def unregister_message_handler(self, key):
+        '''删除指令到来之后的处理函数'''
+        self.handlers = self.handlers[0:key]
+        self.handlers.extend(self.handlers[key+1:])
 
 
 class ThunnelClient():

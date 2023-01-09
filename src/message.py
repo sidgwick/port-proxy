@@ -1,4 +1,5 @@
 from __future__ import annotations
+import traceback
 import logging
 import struct
 import socket
@@ -38,9 +39,7 @@ def fetch_message_list(sock: thunnel.ThunnelConnection) -> Message:
 
             msg_list.append(msg)
     except Exception as e:
-        import traceback
-        print(traceback.format_exc())
-        logging.error(f"fetch message from remote server error {e}")
+        logging.error(f"fetch message from remote server error {e}\n{traceback.format_exc()}")
 
     return msg_list
 

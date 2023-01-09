@@ -17,13 +17,14 @@ cat << EO_ENTRY > $package/usr/bin/pproxy
 python /usr/lib/pproxy/app.py $@
 EO_ENTRY
 
-cp ../{client,server}.yaml $package/etc/pproxy
-cp -r ../app.py ../src $package/lib/pproxy
+cp ../{local-server,remote-server}.yaml $package/etc/pproxy
+cp -r ../app.py ../src $package/usr/lib/pproxy
 
 chmod 0755 $package/DEBIAN/{preinst,prerm,postinst,postrm}
 chmod a+x $package/usr/bin/*
 
-dpkg-deb --build --root-owner-group $package
+# dpkg-deb --build --root-owner-group $package
+fakeroot dpkg-deb --build $package
 
 rm -rf $package
 

@@ -7,12 +7,13 @@ from src.remote import RemoteServer
 logging.basicConfig(level=logging.DEBUG)
 
 if __name__ == '__main__':
-    cfg_path = sys.argv[1]
+    mode = sys.argv[1]
+    cfg_path = sys.argv[2]
 
-    if cfg_path == 'local-server.yaml':
+    if mode == "local":
         server = LocalServer(cfg_path)
         server.serve()
 
-    if cfg_path == 'remote-server.yaml':
+    if mode == "remote":
         server = RemoteServer(cfg_path)
         server.serve()

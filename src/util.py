@@ -52,7 +52,7 @@ def parse_http(data: bytes) -> tuple[str, dict[str, str], bytes]:
             body = lines[idx]
             break
 
-        k, v = [x.strip() for x in line.split(b":")]
+        k, v = [x.strip() for x in line.split(b":", maxsplit=1)]
         kk = k.decode()
         vv = v.decode()
         headers[kk] = vv

@@ -66,7 +66,7 @@ class RemoteServer(base.BaseServer):
         _, sock = ss
         sock.send(data)
 
-    def send_message(self, sock: socket.socket, msg):
+    def send_message(self, sock: ThunnelConnection, msg):
         logging.debug(f"sending {msg} to {sock.getpeername()}")
         _msg = msg.encode()
         sock.send(_msg)

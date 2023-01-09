@@ -27,8 +27,9 @@ def _decode(data: bytes) -> tuple[int, WebsocketFrame]:
     '''
 
     def readx(l) -> tuple[bytes, bytes]:
-        if len(data) < l:
-            raise WebsocketReadError(f"获取不到合法的 websocket 数据帧")
+        xl = len(data)
+        if xl < l:
+            raise WebsocketReadError(f"获取不到合法的 websocket 数据帧: {xl} < {l}")
         return data[0:l], data[l:]
 
     raw = len(data)
@@ -59,7 +60,7 @@ def _decode(data: bytes) -> tuple[int, WebsocketFrame]:
     return raw - len(data), frame
 
 
-def decode(data) -> tuple[int, WebsocketFrame]:
+def decode(data: bytearray) -> tuple[int, WebsocketFrame]:
     try:
         cl, frame = _decode(data)
         return cl, frame
@@ -69,9 +70,9 @@ def decode(data) -> tuple[int, WebsocketFrame]:
     return 0, None
 
 
-def encode(data: bytes) -> bytes:
+def encode(data: bytearray) -> bytearray:
     '''构造 websocket 数据帧(网络传输)'''
-    result = b''
+    result = bytearray()
 
     fin = 1  # 1
     opcode = _opBinFrame
@@ -126,10 +127,12 @@ class WebsocketFrame():
             return 0
 
         cl, frame = decode(data)
+        if frame is None:
+            return 0
 
         self.fin = frame.fin
         self.length += frame.length
-        self.data += frame.data
+        self.data.extend(frame.data)
 
         return cl
 
@@ -140,8 +143,8 @@ class FrameCache():
         super(FrameCache, self).__init__()
         self.sock = sock
 
-        self.buffer: bytes = b''
-        self.data: bytes = b''
+        self.buffer: bytearray = bytearray()
+        self.data: bytearray = bytearray()
         self.frame: WebsocketFrame = None
 
     def set_socket(self, sock: socket.socket):
@@ -152,6 +155,7 @@ class FrameCache():
 
     def read(self, n):
         length = len(self.data)
+        print('xxxxxxx', length, self.data)
         if length == 0:
             return None
 
@@ -169,33 +173,31 @@ class FrameCache():
             logging.debug(f"read all from socket error: {e}")
 
     def _readall(self):
-        _data = bytearray()
         while True:
-            tmp = self.sock.recv(1024)
-            # print(f'recv_frame data read: {tmp}')
-            _data.extend(tmp)
-            if len(tmp) < 1024:
+            _data = self.sock.recv(1024)
+            _data = bytearray(_data)
+            self.buffer.extend(_data)
+            if len(_data) < 1024:
                 break
-
-        self.buffer += _data
 
     def decode_all_frame(self):
         data = self.buffer
         frame = self.frame
 
         while True:
-            data, frame = self._decode_all_frame(data, frame)
-            if frame is None:
+            _data, frame = self._decode_all_frame(data, frame)
+            if len(data) == len(_data):
                 break
 
+            data = _data
             if frame.fin:
-                self.data += frame.data
+                self.data.extend(frame.data)
                 frame = None
 
         self.buffer = data
         self.frame = frame
 
-    def _decode_all_frame(self, data: bytes, frame: WebsocketFrame) -> tuple[bytes, WebsocketFrame]:
+    def _decode_all_frame(self, data: bytearray, frame: WebsocketFrame) -> tuple[bytearray, WebsocketFrame]:
         if len(data) == 0:
             return data, None
 
@@ -258,6 +260,8 @@ class WebsocketConnection(ThunnelConnection):
 
     def send(self, data):
         frame = encode(data)
+        x, _frame = decode(frame)
+        logging.debug(f"send data over websocket: {x}, {_frame}")
         res = self.sock.sendall(frame)
         return res
 
@@ -311,7 +315,7 @@ class Client(WebsocketConnection, ThunnelClient):
 
     def http_upgrade_request(self):
         '''发送建立 websocket 链接请求'''
-        req = "HTTP/1.1 101 Switching Protocols\r\n" + \
+        req = "GET / HTTP/1.1\r\n" + \
               "Upgrade: websocket\r\n" + \
               "Connection: Upgrade\r\n" + \
               "Sec-WebSocket-Key: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n"
@@ -364,7 +368,7 @@ class Server(ThunnelServer):
         logging.debug(f"websocket handshake request:\n{data}")
 
         first, headers, body = util.parse_http(data)
-        if first != "HTTP/1.1 101 Switching Protocols":
+        if first != "GET / HTTP/1.1":
             raise Exception('Websocket Switching Protocols request except')
 
         # is it a websocket request?

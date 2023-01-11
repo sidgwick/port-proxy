@@ -32,7 +32,7 @@ class ThunnelConnection(ABC):
         return NotImplementedError
 
     @abstractmethod
-    def send(self):
+    def send(self, msg: bytes):
         '''send data to remote server'''
         return NotImplementedError
 

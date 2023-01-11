@@ -59,12 +59,14 @@ class TcpConnection(ThunnelConnection):
 
 class Client(TcpConnection, ThunnelClient):
 
-    def __init__(self, name="", ip=None, port=None):
+    def __init__(self, name="", addr=None):
         TcpConnection.__init__(self, name=name, sock=None)
+
+        ip, port = util.parse_ip_port(addr)
 
         self.ip = ip
         self.port = port
-        self.name = name
+        self._name = name
         self.sock = None
 
     def connect(self):

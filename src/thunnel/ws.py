@@ -1,9 +1,12 @@
 from __future__ import annotations
+
+import json
 import logging
 import socket
 import struct
 import hashlib
 import base64
+from urllib.parse import urlparse
 
 from .. import util
 from . import ThunnelClient, ThunnelServer, ThunnelConnection
@@ -288,27 +291,46 @@ class WebsocketConnection(ThunnelConnection):
 
 class Client(WebsocketConnection, ThunnelClient):
 
-    def __init__(self, name="", ip=None, port=None):
+    def __init__(self, name="", addr=None):
         WebsocketConnection.__init__(self, name=name, sock=None)
-        self.ip = ip
-        self.port = port
-        self.name = name
-        self.sock: socket.socket = None
+        self.addr = addr
+        self._name = name
+        self.sock: socket.socket | None = None
+
+    def __str__(self):
+        return f'{self.addr}'
 
     def connect(self):
         '''connect to remote server'''
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((self.ip, self.port))
+        u = urlparse(self.addr)
+
+
+        ip = socket.getaddrinfo(u.hostname, None, socket.AF_INET6)
+        port = u.port if u.port is not None else 80
+
+        ip = u.hostname
+
+
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        sock.connect((ip, port))
 
         self.set_socket(sock)
-        self.http_upgrade_request()
+        self.http_upgrade_request(u.netloc, u.path)
         self.websocket_client_handshake()
         sock.setblocking(False)
 
     def websocket_client_handshake(self):
-        data = self.sock.recv(1024)
+        logging.info(f"waitting for websocket handshake response")
 
-        # logging.info(f"websocket handshake response :\n{data}")
+
+        data = b''
+        while True:
+            _data = self.sock.recv(10)
+            data += _data
+            if len(_data) < 10:
+                break
+
+        logging.info(f"websocket handshake response received:\n{data}")
 
         first, headers, body = util.parse_http(data)
 
@@ -320,16 +342,24 @@ class Client(WebsocketConnection, ThunnelClient):
             logging.error(f"bad websocket handshake response :\n{data}")
             self.sock.close()
 
-    def http_upgrade_request(self):
+    def http_upgrade_request(self, netloc="", path="/"):
         '''发送建立 websocket 链接请求'''
-        req = "GET / HTTP/1.1\r\n" + \
-              "Upgrade: websocket\r\n" + \
-              "Connection: Upgrade\r\n" + \
-              "Sec-WebSocket-Key: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n"
+        _req = [
+            f"GET {path} HTTP/1.1",
+            f"Host: {netloc}",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            # "x-tt-env: boe_szg_dev",
+            # "x-use-boe: 1",
+            "Sec-Websocket-Key: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+            "",
+            "",
+        ]
 
+        req = "\r\n".join(_req)
         req = req.encode()
         self.sock.send(req)
-        # logging.info(f"websocket request send:\n{req}")
+        logging.info(f"websocket request send:\n{req}")
 
 
 class Server(ThunnelServer):
@@ -377,10 +407,10 @@ class Server(ThunnelServer):
             if len(_data) < 1024:
                 break
 
-        # logging.debug(f"websocket handshake request:\n{data}")
+        logging.debug(f"websocket handshake request received:\n{data}")
 
         first, headers, body = util.parse_http(data)
-        if first[:3] == "GET" and first[-8:] == "HTTP/1.1":
+        if not (first[:3] == "GET" and first[-8:] == "HTTP/1.1"):
             raise Exception('Websocket Switching Protocols request except')
 
         # is it a websocket request?
@@ -389,10 +419,10 @@ class Server(ThunnelServer):
         is_websocket_req = connection == "Upgrade" and upgrade == "websocket"
         if not is_websocket_req:
             resp = "HTTP/1.1 400 Bad Request\r\n" + \
-                    "Content-Type: text/plain\r\n" + \
-                    "Connection: close\r\n" + \
-                    "\r\n" + \
-                    "Incorrect request"
+                   "Content-Type: text/plain\r\n" + \
+                   "Connection: close\r\n" + \
+                   "\r\n" + \
+                   "Incorrect request"
 
             resp = resp.encode()
             logging.debug(f"bad websocket handshake response:\n{resp}")
@@ -411,14 +441,20 @@ class Server(ThunnelServer):
         resp_key = base64.standard_b64encode(h)
         resp_key = resp_key.decode()
 
-        resp = "HTTP/1.1 101 Switching Protocols\r\n" + \
-               "Upgrade: websocket\r\n" + \
-               "Connection: Upgrade\r\n" + \
-               f"Sec-WebSocket-Accept: {resp_key}\r\n\r\n"
+        _resp = [
+            "HTTP/1.1 101 Switching Protocols",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            f"Sec-WebSocket-Accept: {resp_key}",
+            "",
+            "",
+        ]
 
+        resp = "\r\n".join(_resp)
         resp = resp.encode()
-        # logging.debug(f"websocket handshake response:\n{resp}")
-        sock.send(resp)
+
+        _sent = sock.send(resp)
+        logging.debug(f"websocket handshake response({_sent}bytes):\n{resp}")
 
         # 正常情况下 body 是没有数据的, 因为握手完成之前应该没有帧数据
         return body

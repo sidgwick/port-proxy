@@ -1,4 +1,5 @@
 .vscode
+.venv
 .idea
 *.deb
 __pycache__

@@ -9,7 +9,7 @@ def parse_xaddr(addr):
     return protocol, ip, port
 
 
-def parse_ip_port(addr):
+def parse_ip_port(addr) -> tuple[str, int]:
     parts = addr.split(':')
 
     ip = '0.0.0.0'

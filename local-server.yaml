@@ -1,16 +1,18 @@
 # 远端服务器的地址
 remote-server:
-  - name: tcp@9015
-    addr: tcp://127.0.0.1:9015
+  # - name: tcp@9015
+  #   protocol: tcp
+  #   addr: 127.0.0.1:9015
 
   - name: websocket@9016
-    addr: ws://127.0.0.1:9016
+    protocol: websocket
+    addr: ws://[fdbd:dc03:ff:501:9bfb:6016:8140:d411]:9635/brand/pp-ws/
 
 proxy_list:
-  - type: tcp # 代理 tcp 流量
-    local: 6689 # local server 监听在 6689
-    remote: tcp@9015
-    remote_port: 8080 # remote server 需要把数据发送到它的 tcp@9015 的 17210 端口
+  # - type: tcp # 代理 tcp 流量
+  #   local: 6689 # local server 监听在 6689
+  #   remote: tcp@9015
+  #   remote_port: 8080 # remote server 需要把数据发送到它的 tcp@9015 的 17210 端口
 
   - type: tcp
     local: 3022

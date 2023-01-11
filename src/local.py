@@ -3,6 +3,7 @@ import socket
 import time
 import logging
 import selectors
+import traceback
 
 from . import util, message
 from .thunnel import ThunnelConnection, tcp, ws
@@ -31,15 +32,14 @@ class LocalServer(BaseServer):
 
     def init_remote_server(self, remote):
         name = remote.get("name")
+        protocol = remote.get("protocol")
         addr = remote.get("addr")
-
-        protocol, ip, port = util.parse_xaddr(addr)
 
         t = None
         if protocol == 'tcp':
-            t = tcp.Client(name=name, ip=ip, port=port)
-        elif protocol == 'ws':
-            t = ws.Client(name=name, ip=ip, port=port)
+            t = tcp.Client(name=name, addr=addr)
+        elif protocol == 'websocket':
+            t = ws.Client(name=name, addr=addr)
 
         while True:
             try:
@@ -47,6 +47,7 @@ class LocalServer(BaseServer):
                 t.connect()
                 break
             except Exception as e:
+                print(traceback.format_exc())
                 logging.error(f"建立 LocalServer -> RemoteServer({t}) 的连接失败: {e}, 稍后即将重试...")
                 time.sleep(2)
 

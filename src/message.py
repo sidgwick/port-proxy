@@ -26,7 +26,7 @@ InsData = 0x0003
 InsCloseConnection = 0x0004
 
 
-def fetch_message_list(sock: thunnel.ThunnelConnection) -> Message:
+def fetch_message_list(sock: thunnel.ThunnelConnection) -> list[Message]:
     msg_list = []
 
     try:
@@ -44,7 +44,7 @@ def fetch_message_list(sock: thunnel.ThunnelConnection) -> Message:
     return msg_list
 
 
-def fetch_message(sock: thunnel.ThunnelConnection) -> Message:
+def fetch_message(sock: thunnel.ThunnelConnection) -> Message | None:
     '''从 sock 里面获取完整的 message 数据包'''
     sock.alive_check()
 
@@ -52,7 +52,6 @@ def fetch_message(sock: thunnel.ThunnelConnection) -> Message:
     if data is None:
         return None
 
-    msg = None
     ins = struct.unpack("!H", data)[0]
 
     if ins == InsInitialConnection:

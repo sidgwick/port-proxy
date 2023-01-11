@@ -370,12 +370,17 @@ class Server(ThunnelServer):
 
     def websocket_server_handshake(self, sock: socket.socket) -> bytes:
         '''初始化 websocket 链接, 完成握手等动作, 为后续的接收/发送数据做准备'''
-        data = sock.recv(1024)
+        data = b''
+        while True:
+            _data = sock.recv(1024)
+            data += _data
+            if len(_data) < 1024:
+                break
 
         # logging.debug(f"websocket handshake request:\n{data}")
 
         first, headers, body = util.parse_http(data)
-        if first != "GET / HTTP/1.1":
+        if first[:3] == "GET" and first[-8:] == "HTTP/1.1":
             raise Exception('Websocket Switching Protocols request except')
 
         # is it a websocket request?
@@ -397,7 +402,7 @@ class Server(ThunnelServer):
             return body
 
         # let's shake hands shall we?
-        key = headers.get("Sec-WebSocket-Key")
+        key = headers.get("Sec-Websocket-Key")
 
         # calculating response as per protocol RFC
         key = key + WS_MAGIC_STRING
